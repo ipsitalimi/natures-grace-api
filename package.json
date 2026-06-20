@@ -1,0 +1,30 @@
+{
+  "//": "Railway env (required in production): NODE_ENV=production | PORT (auto) | SUPABASE_URL | SUPABASE_SERVICE_ROLE_KEY | RAZORPAY_KEY_ID | RAZORPAY_KEY_SECRET | RAZORPAY_WEBHOOK_SECRET | CORS_ALLOWED_ORIGINS (comma-separated app origins). Optional: EXPO_ACCESS_TOKEN (push), EMAIL_PROVIDER+RESEND_API_KEY or SMTP_*, RAZORPAYX_ACCOUNT_NUMBER, RAZORPAYX_FUND_ACCOUNT_ID, RAZORPAYX_WEBHOOK_SECRET, RAZORPAYX_PAYOUT_MODE",
+  "name": "natures-grace-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone Express API for Nature's Grace (Railway). Set env vars in the Railway dashboard — see the // field above.",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
+    "start": "NODE_ENV=production node dist/index.js",
+    "dev": "NODE_ENV=development tsx server/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.106.1",
+    "dotenv": "^16.4.7",
+    "express": "^5.0.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "24.10.0",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.20.6",
+    "typescript": "~5.9.2"
+  }
+}
