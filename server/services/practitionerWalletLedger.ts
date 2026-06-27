@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { isBankAccountLinkedForPayout, validateBankDetailsInput } from "../lib/walletBank";
 
 type BookingRow = {
   id: string;
@@ -8,7 +9,17 @@ type BookingRow = {
   payment_status: string;
   amount: number;
   service_name: string;
+  razorpay_payment_id?: string | null;
 };
+
+function isVerifiedBookingPaymentId(paymentId: string | null | undefined): boolean {
+  const id = paymentId?.trim();
+  if (!id) return false;
+  if (process.env.NODE_ENV === "production" && id.startsWith("pay_dev_")) {
+    return false;
+  }
+  return true;
+}
 
 type WalletRow = {
   id: string;
@@ -18,6 +29,7 @@ type WalletRow = {
   held_balance: number;
   total_earned: number;
   commission_rate: number;
+  bank_account_label?: string | null;
 };
 
 type WalletTxnRow = {
@@ -87,7 +99,13 @@ export async function creditBookingEarning(
   booking: BookingRow,
   commissionRate: number
 ): Promise<void> {
-  if (booking.payment_status !== "Paid" || !booking.practitioner_id) return;
+  if (
+    booking.payment_status !== "Paid" ||
+    !booking.practitioner_id ||
+    !isVerifiedBookingPaymentId(booking.razorpay_payment_id)
+  ) {
+    return;
+  }
 
   const wallet = await getOrCreatePractitionerWallet(
     supabase,
@@ -259,7 +277,7 @@ export async function syncPractitionerWalletFromBookings(
   const { data: bookings } = await supabase
     .from("practitioner_bookings")
     .select(
-      "id, booking_number, practitioner_id, booking_status, payment_status, amount, service_name"
+      "id, booking_number, practitioner_id, booking_status, payment_status, amount, service_name, razorpay_payment_id"
     )
     .eq("practitioner_id", practitionerId);
 
@@ -268,13 +286,34 @@ export async function syncPractitionerWalletFromBookings(
       await reverseBookingEarning(supabase, row, commissionRate);
       continue;
     }
-    if (row.payment_status === "Paid") {
+    if (row.payment_status === "Paid" && isVerifiedBookingPaymentId(row.razorpay_payment_id)) {
       await creditBookingEarning(supabase, row, commissionRate);
       if (row.booking_status === "Completed") {
         await releaseBookingEarning(supabase, row, commissionRate);
       }
     }
   }
+}
+
+export async function updatePractitionerBankDetails(
+  supabase: SupabaseClient,
+  practitionerId: string,
+  commissionRate: number,
+  input: { bankName: string; last4: string; accountHolder: string }
+): Promise<{ error?: string }> {
+  const validated = validateBankDetailsInput(input);
+  if (!validated.ok) return { error: validated.error };
+
+  const wallet = await getOrCreatePractitionerWallet(supabase, practitionerId, commissionRate);
+  if (!wallet) return { error: "Wallet not found" };
+
+  const { error } = await supabase
+    .from("practitioner_wallets")
+    .update({ bank_account_label: validated.label })
+    .eq("id", wallet.id);
+
+  if (error) return { error: error.message };
+  return {};
 }
 
 export async function requestPractitionerPayout(
@@ -290,10 +329,31 @@ export async function requestPractitionerPayout(
   );
   if (!wallet) return { error: "Wallet not found" };
 
-  if (amount <= 0) return { error: "Invalid amount" };
-  if (amount > Number(wallet.available_balance)) {
-    return { error: "Insufficient available balance" };
+  const { data: walletRow } = await supabase
+    .from("practitioner_wallets")
+    .select("bank_account_label")
+    .eq("id", wallet.id)
+    .maybeSingle();
+
+  if (!isBankAccountLinkedForPayout((walletRow as { bank_account_label?: string | null } | null)?.bank_account_label)) {
+    return { error: "Bank account details required before requesting a withdrawal" };
   }
+
+  if (amount <= 0) return { error: "Invalid amount" };
+
+  const { data: reservedWallet, error: reserveError } = await supabase
+    .from("practitioner_wallets")
+    .update({
+      available_balance: Number(wallet.available_balance) - amount,
+      pending_payout: Number(wallet.pending_payout) + amount,
+    })
+    .eq("id", wallet.id)
+    .gte("available_balance", amount)
+    .select()
+    .maybeSingle();
+
+  if (reserveError) return { error: reserveError.message };
+  if (!reservedWallet) return { error: "Insufficient available balance" };
 
   const { data: payout, error: payoutError } = await supabase
     .from("practitioner_payouts")
@@ -307,6 +367,10 @@ export async function requestPractitionerPayout(
     .single();
 
   if (payoutError || !payout) {
+    await updateWallet(supabase, wallet.id, {
+      available_balance: Number(reservedWallet.available_balance) + amount,
+      pending_payout: Math.max(0, Number(reservedWallet.pending_payout) - amount),
+    });
     return { error: payoutError?.message ?? "Could not create payout" };
   }
 
@@ -324,13 +388,12 @@ export async function requestPractitionerPayout(
 
   if (txnError) {
     await supabase.from("practitioner_payouts").delete().eq("id", payout.id);
+    await updateWallet(supabase, wallet.id, {
+      available_balance: Number(reservedWallet.available_balance) + amount,
+      pending_payout: Math.max(0, Number(reservedWallet.pending_payout) - amount),
+    });
     return { error: txnError.message };
   }
-
-  await updateWallet(supabase, wallet.id, {
-    available_balance: Number(wallet.available_balance) - amount,
-    pending_payout: Number(wallet.pending_payout) + amount,
-  });
 
   return { payoutId: payout.id as string };
 }

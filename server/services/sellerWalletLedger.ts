@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { isBankAccountLinkedForPayout, validateBankDetailsInput } from "../lib/walletBank";
 
 type OrderRow = {
   id: string;
@@ -17,6 +18,7 @@ type WalletRow = {
   held_balance: number;
   total_earned: number;
   commission_rate: number;
+  bank_account_label?: string | null;
 };
 
 type WalletTxnRow = {
@@ -272,6 +274,27 @@ export async function syncSellerWalletFromOrders(
   }
 }
 
+export async function updateSellerBankDetails(
+  supabase: SupabaseClient,
+  sellerId: string,
+  commissionRate: number,
+  input: { bankName: string; last4: string; accountHolder: string }
+): Promise<{ error?: string }> {
+  const validated = validateBankDetailsInput(input);
+  if (!validated.ok) return { error: validated.error };
+
+  const wallet = await getOrCreateSellerWallet(supabase, sellerId, commissionRate);
+  if (!wallet) return { error: "Wallet not found" };
+
+  const { error } = await supabase
+    .from("seller_wallets")
+    .update({ bank_account_label: validated.label })
+    .eq("id", wallet.id);
+
+  if (error) return { error: error.message };
+  return {};
+}
+
 export async function requestSellerPayout(
   supabase: SupabaseClient,
   sellerId: string,
@@ -281,10 +304,31 @@ export async function requestSellerPayout(
   const wallet = await getOrCreateSellerWallet(supabase, sellerId, commissionRate);
   if (!wallet) return { error: "Wallet not found" };
 
-  if (amount <= 0) return { error: "Invalid amount" };
-  if (amount > Number(wallet.available_balance)) {
-    return { error: "Insufficient available balance" };
+  const { data: walletRow } = await supabase
+    .from("seller_wallets")
+    .select("bank_account_label")
+    .eq("id", wallet.id)
+    .maybeSingle();
+
+  if (!isBankAccountLinkedForPayout((walletRow as { bank_account_label?: string | null } | null)?.bank_account_label)) {
+    return { error: "Bank account details required before requesting a withdrawal" };
   }
+
+  if (amount <= 0) return { error: "Invalid amount" };
+
+  const { data: reservedWallet, error: reserveError } = await supabase
+    .from("seller_wallets")
+    .update({
+      available_balance: Number(wallet.available_balance) - amount,
+      pending_payout: Number(wallet.pending_payout) + amount,
+    })
+    .eq("id", wallet.id)
+    .gte("available_balance", amount)
+    .select()
+    .maybeSingle();
+
+  if (reserveError) return { error: reserveError.message };
+  if (!reservedWallet) return { error: "Insufficient available balance" };
 
   const { data: payout, error: payoutError } = await supabase
     .from("seller_payouts")
@@ -298,6 +342,10 @@ export async function requestSellerPayout(
     .single();
 
   if (payoutError || !payout) {
+    await updateWalletBalances(supabase, wallet.id, {
+      available_balance: Number(reservedWallet.available_balance) + amount,
+      pending_payout: Math.max(0, Number(reservedWallet.pending_payout) - amount),
+    });
     return { error: payoutError?.message ?? "Could not create payout" };
   }
 
@@ -313,13 +361,12 @@ export async function requestSellerPayout(
 
   if (txnError) {
     await supabase.from("seller_payouts").delete().eq("id", payout.id);
+    await updateWalletBalances(supabase, wallet.id, {
+      available_balance: Number(reservedWallet.available_balance) + amount,
+      pending_payout: Math.max(0, Number(reservedWallet.pending_payout) - amount),
+    });
     return { error: txnError.message };
   }
-
-  await updateWalletBalances(supabase, wallet.id, {
-    available_balance: Number(wallet.available_balance) - amount,
-    pending_payout: Number(wallet.pending_payout) + amount,
-  });
 
   return { payoutId: payout.id as string };
 }

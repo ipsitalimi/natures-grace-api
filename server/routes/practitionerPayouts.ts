@@ -26,31 +26,50 @@ async function handleDispatch(req: Request, res: Response) {
 
     const payoutId = paramId(req.params.payoutId);
     const supabase = requireSupabaseAdmin();
-    const payout = await getPayoutById(supabase, payoutId);
-    if (!payout) return res.status(404).json({ error: "Payout not found" });
 
     const ownsPayout = await verifyPractitionerPayoutOwnership(supabase, payoutId, user.id);
     if (!ownsPayout) {
       return res.status(403).json({ error: "Forbidden" });
     }
 
-    if (payout.status !== "Pending") {
+    const existing = await getPayoutById(supabase, payoutId);
+    if (!existing) return res.status(404).json({ error: "Payout not found" });
+
+    const { data: claimed } = await supabase
+      .from("practitioner_payouts")
+      .update({ status: "Processing", notes: "Submitting to RazorpayX" })
+      .eq("id", payoutId)
+      .eq("status", "Pending")
+      .select()
+      .maybeSingle();
+
+    if (!claimed) {
+      const latest = await getPayoutById(supabase, payoutId);
       return res.status(200).json({
-        payoutId: payout.id,
-        status: payout.status,
+        payoutId: latest?.id ?? payoutId,
+        status: latest?.status ?? "Processing",
         message: "Payout already dispatched",
       });
     }
+
+    const payout = claimed as typeof claimed & { amount: number; id: string; notes?: string | null };
 
     if (isRazorpayConfigured()) {
       const result = await createRazorpayPayout({
         referenceId: payout.id,
         amountInr: Number(payout.amount),
-        fundAccountId: payout.razorpay_fund_account_id ?? undefined,
+        fundAccountId: (payout as { razorpay_fund_account_id?: string | null }).razorpay_fund_account_id ?? undefined,
         narration: "NG practitioner payout",
       });
 
-      if (!result.ok) return res.status(502).json({ error: result.error });
+      if (!result.ok) {
+        await supabase
+          .from("practitioner_payouts")
+          .update({ status: "Pending", notes: payout.notes ?? null })
+          .eq("id", payoutId)
+          .eq("status", "Processing");
+        return res.status(502).json({ error: result.error });
+      }
 
       await markPayoutProcessing(supabase, payoutId, {
         razorpayPayoutId: result.payoutId,
@@ -90,6 +109,12 @@ async function handleDispatch(req: Request, res: Response) {
         devMode: true,
       });
     }
+
+    await supabase
+      .from("practitioner_payouts")
+      .update({ status: "Pending", notes: existing.notes ?? null })
+      .eq("id", payoutId)
+      .eq("status", "Processing");
 
     return res.json({
       payoutId,

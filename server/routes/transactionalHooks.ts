@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { requireBearerUser, requireRole } from "../middleware/auth";
 import { requireSupabaseAdmin } from "../lib/supabaseAdmin";
+import { checkRateLimit } from "../lib/rateLimit";
 import { dispatchUserNotification, type NotificationEvent } from "../services/notificationDispatch";
 import { sendEmailToUserId, sendTransactionalEmail, type EmailTemplateId } from "../services/email/emailService";
 
@@ -29,6 +30,15 @@ export function registerTransactionalHooksRoutes(app: Express) {
   app.post("/api/hooks/password-reset-requested", async (req: Request, res: Response) => {
     const { email } = req.body as { email?: string };
     if (!email?.trim()) return res.status(400).json({ error: "Email required" });
+
+    const rateKey = `password-reset:${req.ip ?? "unknown"}:${email.trim().toLowerCase()}`;
+    const limit = checkRateLimit(rateKey, 3, 15 * 60 * 1000);
+    if (!limit.allowed) {
+      return res.status(429).json({
+        error: "Too many password reset requests. Try again later.",
+        retryAfterSec: limit.retryAfterSec,
+      });
+    }
 
     const result = await sendTransactionalEmail("password_reset_requested", email.trim(), {
       name: "there",

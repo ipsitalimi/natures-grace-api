@@ -33,11 +33,23 @@ async function decrementOrderStock(
       .from("products")
       .select("stock")
       .eq("id", productId)
+      .gte("stock", qty)
       .maybeSingle();
 
     if (!product) continue;
-    const nextStock = Math.max(0, Number(product.stock) - qty);
-    await supabase.from("products").update({ stock: nextStock }).eq("id", productId);
+    const currentStock = Number(product.stock);
+    const nextStock = currentStock - qty;
+    const { data: updated } = await supabase
+      .from("products")
+      .update({ stock: nextStock })
+      .eq("id", productId)
+      .eq("stock", currentStock)
+      .select("id")
+      .maybeSingle();
+
+    if (!updated) {
+      console.warn(`[orderFulfillment] stock race for product ${productId}, order ${orderId}`);
+    }
   }
 }
 
@@ -193,7 +205,7 @@ export async function fulfillStoreOrderPayment(params: {
     return { ok: false, error: "Order is not awaiting payment" };
   }
 
-  const { error: updateError } = await supabase
+  const { data: updated, error: updateError } = await supabase
     .from("orders")
     .update({
       payment_status: "Paid",
@@ -201,44 +213,72 @@ export async function fulfillStoreOrderPayment(params: {
       razorpay_payment_id: paymentId,
     })
     .eq("id", storeOrderId)
-    .eq("payment_status", "Pending");
+    .eq("payment_status", "Pending")
+    .select(
+      "id, order_number, user_id, payment_status, status, seller_id, total, seller_promo_id, platform_promo_id"
+    )
+    .maybeSingle();
 
   if (updateError) {
     return { ok: false, error: updateError.message };
   }
 
+  if (!updated) {
+    const { data: recheck } = await supabase
+      .from("orders")
+      .select("order_number, payment_status")
+      .eq("id", storeOrderId)
+      .maybeSingle();
+
+    if (recheck?.payment_status === "Paid") {
+      return {
+        ok: true,
+        orderNumber: recheck.order_number as string,
+        alreadyPaid: true,
+      };
+    }
+
+    return { ok: false, error: "Order is not awaiting payment" };
+  }
+
+  const orderAfterPay = updated as StoreOrderRow;
+
   const commissionRate =
     params.commissionRate ?? (await fetchCommissionRate(supabase));
 
-  await incrementPromoUsage(supabase, order);
+  await incrementPromoUsage(supabase, orderAfterPay);
   await decrementOrderStock(supabase, storeOrderId);
 
   await creditOrderEarning(
     supabase,
     {
-      id: order.id,
-      order_number: order.order_number,
-      seller_id: order.seller_id,
-      status: order.status,
+      id: orderAfterPay.id,
+      order_number: orderAfterPay.order_number,
+      seller_id: orderAfterPay.seller_id,
+      status: orderAfterPay.status,
       payment_status: "Paid",
-      total: Number(order.total),
+      total: Number(orderAfterPay.total),
     },
     commissionRate
   );
 
   await dispatchUserNotification(supabase, {
-    userId: order.user_id,
+    userId: orderAfterPay.user_id,
     event: "order_confirmed",
-    message: `Order ${order.order_number} confirmed. Payment received.`,
+    message: `Order ${orderAfterPay.order_number} confirmed. Payment received.`,
     linkRoute: "OrderDetail",
-    linkTargetId: order.id,
+    linkTargetId: orderAfterPay.id,
     emailVars: {
-      orderNumber: order.order_number as string,
-      total: `₹${Number(order.total).toLocaleString("en-IN")}`,
+      orderNumber: orderAfterPay.order_number as string,
+      total: `₹${Number(orderAfterPay.total).toLocaleString("en-IN")}`,
     },
   });
 
-  await notifySellerNewOrder(supabase, order);
+  await notifySellerNewOrder(supabase, orderAfterPay);
 
-  return { ok: true, orderNumber: order.order_number as string, alreadyPaid: false };
+  return {
+    ok: true,
+    orderNumber: orderAfterPay.order_number as string,
+    alreadyPaid: false,
+  };
 }

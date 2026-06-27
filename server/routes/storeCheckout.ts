@@ -3,7 +3,57 @@ import {
   confirmStoreOrderPayment,
   createStoreRazorpayOrder,
 } from "../services/storeOrderPayment";
+import { createValidatedStoreOrder } from "../services/storeOrderCreation";
 import { requireBearerUser } from "../middleware/auth";
+
+/** POST /api/store/checkout/create-order */
+async function handleCreateOrder(req: Request, res: Response) {
+  try {
+    const user = await requireBearerUser(req, res);
+    if (!user) return;
+
+    const body = req.body as {
+      customerName?: string;
+      customerEmail?: string;
+      items?: { productId: string; quantity: number }[];
+      deliveryOption?: string;
+      notes?: string;
+      sellerPromoId?: string | null;
+      platformPromoId?: string | null;
+    };
+
+    if (!body.items?.length) {
+      return res.status(400).json({ error: "items are required" });
+    }
+
+    const result = await createValidatedStoreOrder({
+      userId: user.id,
+      customerName: body.customerName?.trim() || user.email?.split("@")[0] || "Guest",
+      customerEmail: body.customerEmail ?? user.email ?? undefined,
+      items: body.items,
+      deliveryOption: body.deliveryOption,
+      notes: body.notes,
+      sellerPromoId: body.sellerPromoId ?? null,
+      platformPromoId: body.platformPromoId ?? null,
+    });
+
+    if (!result.ok) {
+      return res.status(400).json({ error: result.error });
+    }
+
+    return res.json({
+      orderId: result.orderId,
+      orderNumber: result.orderNumber,
+      subtotal: result.subtotal,
+      deliveryFee: result.deliveryFee,
+      promoDiscount: result.promoDiscount,
+      total: result.total,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Create order failed";
+    return res.status(500).json({ error: message });
+  }
+}
 
 /** POST /api/store/checkout/create-payment */
 async function handleCreatePayment(req: Request, res: Response) {
@@ -85,6 +135,7 @@ async function handleConfirmPayment(req: Request, res: Response) {
 }
 
 export function registerStoreCheckoutRoutes(app: Express) {
+  app.post("/api/store/checkout/create-order", handleCreateOrder);
   app.post("/api/store/checkout/create-payment", handleCreatePayment);
   app.post("/api/store/checkout/confirm-payment", handleConfirmPayment);
 }

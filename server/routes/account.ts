@@ -5,6 +5,50 @@ import { sendEmailToUserId } from "../services/email/emailService";
 import { insertActivityLog } from "../services/activityLogAdmin";
 
 export function registerAccountRoutes(app: Express): void {
+  const performAccountDeletion = async (
+    supabase: ReturnType<typeof requireSupabaseAdmin>,
+    userId: string
+  ): Promise<{ error?: string }> => {
+    await supabase
+      .from("profiles")
+      .update({
+        full_name: "Deleted User",
+        email: `deleted+${userId.slice(0, 8)}@deleted.local`,
+        phone: null,
+        status: "Deleted",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", userId);
+
+    await supabase
+      .from("account_deletion_requests")
+      .update({
+        status: "completed",
+        processed_at: new Date().toISOString(),
+      })
+      .eq("user_id", userId);
+
+    const { error: deleteError } = await supabase.auth.admin.deleteUser(userId);
+    if (deleteError) {
+      return { error: deleteError.message };
+    }
+
+    return {};
+  };
+
+  app.post("/api/account/delete", async (req: Request, res: Response) => {
+    const user = await requireBearerUser(req, res);
+    if (!user) return;
+
+    const supabase = requireSupabaseAdmin();
+    const result = await performAccountDeletion(supabase, user.id);
+    if (result.error) {
+      return res.status(500).json({ error: result.error });
+    }
+
+    return res.json({ ok: true });
+  });
+
   app.post("/api/account/request-deletion", async (req: Request, res: Response) => {
     const user = await requireBearerUser(req, res);
     if (!user) return;
@@ -59,52 +103,9 @@ export function registerAccountRoutes(app: Express): void {
     const userId = String(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
     const supabase = requireSupabaseAdmin();
 
-    const { data: openOrders } = await supabase
-      .from("orders")
-      .select("id")
-      .eq("user_id", userId)
-      .in("status", ["Pending", "Processing", "Shipped"])
-      .limit(1);
-
-    if (openOrders?.length) {
-      return res.status(409).json({ error: "User has open orders. Resolve them before deletion." });
-    }
-
-    const { data: openBookings } = await supabase
-      .from("practitioner_bookings")
-      .select("id")
-      .eq("user_id", userId)
-      .in("booking_status", ["Pending", "Confirmed"])
-      .limit(1);
-
-    if (openBookings?.length) {
-      return res.status(409).json({
-        error: "User has upcoming sessions. Cancel them before deletion.",
-      });
-    }
-
-    await supabase
-      .from("profiles")
-      .update({
-        full_name: "Deleted User",
-        email: `deleted+${userId.slice(0, 8)}@deleted.local`,
-        phone: null,
-        status: "Deleted",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", userId);
-
-    await supabase
-      .from("account_deletion_requests")
-      .update({
-        status: "completed",
-        processed_at: new Date().toISOString(),
-      })
-      .eq("user_id", userId);
-
-    const { error: deleteError } = await supabase.auth.admin.deleteUser(userId);
-    if (deleteError) {
-      return res.status(500).json({ error: deleteError.message });
+    const result = await performAccountDeletion(supabase, userId);
+    if (result.error) {
+      return res.status(500).json({ error: result.error });
     }
 
     await insertActivityLog(supabase, {

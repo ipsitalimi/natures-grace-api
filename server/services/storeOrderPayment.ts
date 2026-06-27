@@ -5,6 +5,7 @@ import {
 } from "./razorpayCheckout";
 import { requireSupabaseAdmin } from "../lib/supabaseAdmin";
 import { fulfillStoreOrderPayment } from "./orderFulfillment";
+import { validatePendingStoreOrderTotal } from "./storeOrderCreation";
 
 export async function createStoreRazorpayOrder(params: {
   storeOrderId: string;
@@ -41,10 +42,12 @@ export async function createStoreRazorpayOrder(params: {
     return { ok: false, error: "Order is not awaiting payment" };
   }
 
-  const amountInr = Number(order.total);
-  if (!Number.isFinite(amountInr) || amountInr <= 0) {
-    return { ok: false, error: "Invalid order total" };
+  const validated = await validatePendingStoreOrderTotal(supabase, params.storeOrderId);
+  if (!validated.ok) {
+    return { ok: false, error: validated.error };
   }
+
+  const amountInr = validated.amountInr;
 
   const result = await createBookingOrder({
     amountInr,
