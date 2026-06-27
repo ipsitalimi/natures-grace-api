@@ -18,12 +18,12 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.106.1",
     "dotenv": "^16.4.7",
+    "esbuild": "^0.25.0",
     "express": "^5.0.1"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
     "@types/node": "24.10.0",
-    "esbuild": "^0.25.0",
     "tsx": "^4.20.6",
     "typescript": "~5.9.2"
   }
