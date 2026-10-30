@@ -12,7 +12,6 @@ import {
   restoreOrderStock,
   restorePromoUsageOnRefund,
 } from "../services/orderFulfillment";
-import { isRazorpayConfigured } from "../services/razorpayX";
 
 type PayoutStatus = "Pending" | "Under Review" | "Processing" | "Completed" | "Rejected";
 
@@ -31,15 +30,6 @@ async function updateSellerPayoutStatus(
     .maybeSingle();
 
   if (!payout) return { error: "Payout not found" };
-
-  if (status === "Completed") {
-    const notes = String((payout as { notes?: string }).notes ?? "");
-    const isManual = notes.includes("Manual withdrawal");
-    const razorpayId = (payout as { razorpay_payout_id?: string | null }).razorpay_payout_id;
-    if (isRazorpayConfigured() && !isManual && !razorpayId) {
-      return { error: "Razorpay payout confirmation required before marking completed" };
-    }
-  }
 
   const patch: Record<string, unknown> = {
     status,
@@ -110,15 +100,6 @@ async function updatePractitionerPayoutStatus(
     .maybeSingle();
 
   if (!payout) return { error: "Payout not found" };
-
-  if (status === "Completed") {
-    const notes = String((payout as { notes?: string }).notes ?? "");
-    const isManual = notes.includes("Manual withdrawal");
-    const razorpayId = (payout as { razorpay_payout_id?: string | null }).razorpay_payout_id;
-    if (isRazorpayConfigured() && !isManual && !razorpayId) {
-      return { error: "Razorpay payout confirmation required before marking completed" };
-    }
-  }
 
   const patch: Record<string, unknown> = {
     status,

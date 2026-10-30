@@ -15,8 +15,8 @@ export type ConfirmPaymentResult =
   | { ok: false; error: string };
 
 function getAuthHeader(): string | null {
-  const keyId = process.env.RAZORPAY_KEY_ID ?? process.env.RAZORPAYX_KEY_ID;
-  const keySecret = process.env.RAZORPAY_KEY_SECRET ?? process.env.RAZORPAYX_KEY_SECRET;
+  const keyId = process.env.RAZORPAY_KEY_ID;
+  const keySecret = process.env.RAZORPAY_KEY_SECRET;
   if (!keyId?.trim() || !keySecret?.trim()) return null;
   const token = Buffer.from(`${keyId.trim()}:${keySecret.trim()}`).toString("base64");
   return `Basic ${token}`;
@@ -102,7 +102,7 @@ export function verifyPaymentSignature(params: {
   paymentId: string;
   signature: string;
 }): boolean {
-  const secret = process.env.RAZORPAY_KEY_SECRET ?? process.env.RAZORPAYX_KEY_SECRET;
+  const secret = process.env.RAZORPAY_KEY_SECRET;
   if (!secret?.trim()) return false;
 
   const body = `${params.orderId}|${params.paymentId}`;

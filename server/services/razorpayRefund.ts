@@ -1,8 +1,8 @@
 import crypto from "node:crypto";
 
 function getAuthHeader(): string | null {
-  const keyId = process.env.RAZORPAY_KEY_ID ?? process.env.RAZORPAYX_KEY_ID;
-  const keySecret = process.env.RAZORPAY_KEY_SECRET ?? process.env.RAZORPAYX_KEY_SECRET;
+  const keyId = process.env.RAZORPAY_KEY_ID;
+  const keySecret = process.env.RAZORPAY_KEY_SECRET;
   if (!keyId?.trim() || !keySecret?.trim()) return null;
   const token = Buffer.from(`${keyId.trim()}:${keySecret.trim()}`).toString("base64");
   return `Basic ${token}`;

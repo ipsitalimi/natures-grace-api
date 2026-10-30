@@ -65,10 +65,7 @@ export async function createStoreRazorpayOrder(params: {
     .eq("id", params.storeOrderId)
     .eq("payment_status", "Pending");
 
-  const keyId =
-    process.env.RAZORPAY_KEY_ID?.trim() ??
-    process.env.RAZORPAYX_KEY_ID?.trim() ??
-    null;
+  const keyId = process.env.RAZORPAY_KEY_ID?.trim() ?? null;
 
   return {
     ok: true,

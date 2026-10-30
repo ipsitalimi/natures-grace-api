@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type PayoutStatus =
   | "Pending"
+  | "Under Review"
   | "Processing"
   | "Completed"
   | "Failed"
@@ -39,20 +40,6 @@ export async function getPayoutById(
     .from("seller_payouts")
     .select("*")
     .eq("id", payoutId)
-    .maybeSingle();
-
-  if (error) throw new Error(error.message);
-  return data as DbPayoutRow | null;
-}
-
-export async function getPayoutByRazorpayId(
-  supabase: SupabaseClient,
-  razorpayPayoutId: string
-): Promise<DbPayoutRow | null> {
-  const { data, error } = await supabase
-    .from("seller_payouts")
-    .select("*")
-    .eq("razorpay_payout_id", razorpayPayoutId)
     .maybeSingle();
 
   if (error) throw new Error(error.message);
@@ -103,7 +90,7 @@ export async function reconcilePendingPayout(
     .from("seller_payouts")
     .select("amount, status")
     .eq("wallet_id", walletId)
-    .in("status", ["Pending", "Processing"]);
+    .in("status", ["Pending", "Processing", "Under Review"]);
 
   if (error) throw new Error(error.message);
 
@@ -231,7 +218,9 @@ export async function failPayout(
   if (error) throw new Error(error.message);
 
   const wasReserved =
-    payout.status === "Pending" || payout.status === "Processing";
+    payout.status === "Pending" ||
+    payout.status === "Processing" ||
+    payout.status === "Under Review";
 
   if (wasReserved) {
     await updateWalletBalances(supabase, payout.wallet_id, {
@@ -268,73 +257,4 @@ export async function failPayout(
 
   await reconcilePendingPayout(supabase, payout.wallet_id);
   return data as DbPayoutRow;
-}
-
-/** Resolve payout from RazorpayX webhook entity. */
-export async function applyRazorpayPayoutStatus(
-  supabase: SupabaseClient,
-  entity: {
-    id?: string;
-    status?: string;
-    fund_account_id?: string;
-    reference_id?: string;
-    failure_reason?: string;
-  },
-  webhookEvent: string
-): Promise<{ payoutId: string; status: PayoutStatus } | null> {
-  const razorpayId = entity.id;
-  const referenceId = entity.reference_id;
-
-  let payout =
-    (razorpayId ? await getPayoutByRazorpayId(supabase, razorpayId) : null) ??
-    (referenceId ? await getPayoutById(supabase, referenceId) : null);
-
-  if (!payout) return null;
-
-  const normalized = (entity.status ?? "").toLowerCase();
-
-  if (
-    normalized === "processed" ||
-    webhookEvent === "payout.processed" ||
-    webhookEvent === "payout.updated.processed"
-  ) {
-    const done = await completePayout(supabase, payout.id, {
-      razorpayPayoutId: razorpayId ?? payout.razorpay_payout_id ?? undefined,
-      razorpayFundAccountId: entity.fund_account_id ?? undefined,
-      webhookEvent,
-    });
-    return { payoutId: done.id, status: done.status };
-  }
-
-  if (
-    normalized === "failed" ||
-    normalized === "reversed" ||
-    normalized === "cancelled" ||
-    webhookEvent.includes("failed") ||
-    webhookEvent.includes("reversed")
-  ) {
-    const failed = await failPayout(supabase, payout.id, {
-      failureReason: entity.failure_reason ?? normalized,
-      razorpayPayoutId: razorpayId ?? undefined,
-      webhookEvent,
-    });
-    return { payoutId: failed.id, status: failed.status };
-  }
-
-  if (
-    normalized === "processing" ||
-    normalized === "queued" ||
-    normalized === "pending" ||
-    webhookEvent === "payout.initiated" ||
-    webhookEvent === "payout.queued"
-  ) {
-    const processing = await markPayoutProcessing(supabase, payout.id, {
-      razorpayPayoutId: razorpayId ?? undefined,
-      razorpayFundAccountId: entity.fund_account_id ?? undefined,
-      webhookEvent,
-    });
-    return { payoutId: processing.id, status: processing.status };
-  }
-
-  return { payoutId: payout.id, status: payout.status };
 }
