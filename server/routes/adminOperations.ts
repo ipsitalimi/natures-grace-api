@@ -251,6 +251,20 @@ export function registerAdminOperationsRoutes(app: Express) {
       return res.status(409).json({ error: `Refund already ${existingStatus}` });
     }
 
+    // Atomically claim approval to prevent concurrent admins from triggering duplicate refunds.
+    // If the gateway outcome is uncertain, leave this claim for manual reconciliation.
+    if (status === "approved") {
+      if ((existing as { processing_started_at?: string | null }).processing_started_at) {
+        return res.status(409).json({ error: "Refund processing was already started. Reconcile Razorpay before retrying." });
+      }
+      const { data: claimed, error: claimError } = await supabase.from("refund_requests")
+        .update({ processing_started_at: new Date().toISOString() })
+        .eq("id", refundId).is("processing_started_at", null)
+        .not("status", "in", '("approved","rejected")').select("id").maybeSingle();
+      if (claimError || !claimed) {
+        return res.status(409).json({ error: "Refund is already being processed or requires reconciliation." });
+      }
+    }
     const userId = (existing as { user_id: string }).user_id;
     const orderId = (existing as { order_id?: string | null }).order_id;
     const bookingId = (existing as { booking_id?: string | null }).booking_id;
@@ -388,6 +402,7 @@ export function registerAdminOperationsRoutes(app: Express) {
         admin_notes: adminNotes ?? null,
         reviewed_by: admin.id,
         reviewed_at: new Date().toISOString(),
+        processed_at: status === "approved" ? new Date().toISOString() : null,
       })
       .eq("id", refundId)
       .select()
