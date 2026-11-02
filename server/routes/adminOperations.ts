@@ -6,7 +6,8 @@ import { sendEmailToUserId } from "../services/email/emailService";
 import { insertActivityLog } from "../services/activityLogAdmin";
 import { createRazorpayRefund } from "../services/razorpayRefund";
 import { reverseOrderEarning } from "../services/sellerWalletLedger";
-import { reverseBookingEarning } from "../services/practitionerWalletLedger";
+import { reverseBookingEarning, reverseBookingEarningForRefund } from "../services/practitionerWalletLedger";
+import { calculateBookingRefund, fetchBookingCancellationPolicy } from "../services/bookingCancellationPolicy";
 import { fetchCommissionRate } from "../services/platformSettings";
 import {
   restoreOrderStock,
@@ -309,44 +310,69 @@ export function registerAdminOperationsRoutes(app: Express) {
         const { data: booking } = await supabase
           .from("practitioner_bookings")
           .select(
-            "id, booking_number, practitioner_id, booking_status, payment_status, amount, service_name, razorpay_payment_id"
+            "id, booking_number, practitioner_id, booking_status, payment_status, amount, service_name, razorpay_payment_id, session_date, session_time"
           )
           .eq("id", bookingId)
           .maybeSingle();
 
         if (!booking) {
           refundError = "Booking not found";
-        } else if (!booking.razorpay_payment_id) {
-          refundError = "Booking has no Razorpay payment ID — process refund manually";
         } else {
-          const razorpayRefund = await createRazorpayRefund({
-            paymentId: booking.razorpay_payment_id as string,
+          const policy = await fetchBookingCancellationPolicy(supabase);
+          const calculation = calculateBookingRefund({
             amountInr: Number(booking.amount),
-            notes: { refund_request_id: refundId },
+            sessionDate: String(booking.session_date ?? ""),
+            sessionTime: String(booking.session_time ?? ""),
+            policy,
           });
-          if (!razorpayRefund.ok) {
-            refundError = razorpayRefund.error;
+          if ("error" in calculation) {
+            refundError = calculation.error;
+          } else if (calculation.refundAmountInr > 0 && !booking.razorpay_payment_id) {
+            refundError = "Booking has no Razorpay payment ID — process refund manually";
+          } else {
+            const policySnapshot = {
+              freeCancellationHours: policy.freeCancellationHours,
+              cancellationFeePercent: policy.cancellationFeePercent,
+              sessionStartsAt: calculation.sessionStartsAt,
+              hoursUntilSession: calculation.hoursUntilSession,
+              freeCancellation: calculation.freeCancellation,
+              appliedFeePercent: calculation.cancellationFeePercent,
+              refundPercent: calculation.refundPercent,
+              bookingAmountInr: Number(booking.amount),
+              refundAmountInr: calculation.refundAmountInr,
+            };
+            const { error: snapshotError } = await supabase.from("refund_requests").update({
+              cancellation_policy_snapshot: policySnapshot, refund_amount: calculation.refundAmountInr,
+            }).eq("id", refundId);
+            if (snapshotError) refundError = snapshotError.message;
+            if (!refundError && calculation.refundAmountInr > 0) {
+              const gatewayRefund = await createRazorpayRefund({
+                paymentId: booking.razorpay_payment_id as string, amountInr: calculation.refundAmountInr,
+                notes: { refund_request_id: refundId },
+              });
+              if (!gatewayRefund.ok) refundError = gatewayRefund.error;
+              else {
+                const { error: refundIdError } = await supabase.from("refund_requests")
+                  .update({ razorpay_refund_id: gatewayRefund.refundId }).eq("id", refundId);
+                if (refundIdError) refundError = refundIdError.message;
+              }
+            }
+            if (!refundError && calculation.refundAmountInr > 0) {
+              const reversal = await reverseBookingEarningForRefund(supabase, {
+                id: booking.id, booking_number: booking.booking_number, practitioner_id: booking.practitioner_id,
+                booking_status: booking.booking_status, payment_status: booking.payment_status,
+                amount: Number(booking.amount), service_name: booking.service_name,
+              }, refundId, calculation.refundAmountInr, commissionRate);
+              if (reversal.error) refundError = reversal.error;
+            }
+            if (!refundError) {
+              const fullRefund = calculation.refundAmountInr >= Number(booking.amount);
+              const { error: bookingUpdateError } = await supabase.from("practitioner_bookings").update({
+                booking_status: "Cancelled", payment_status: fullRefund ? "Refunded" : booking.payment_status,
+              }).eq("id", bookingId);
+              if (bookingUpdateError) refundError = bookingUpdateError.message;
+            }
           }
-        }
-
-        if (!refundError && booking) {
-          await reverseBookingEarning(
-            supabase,
-            {
-              id: booking.id,
-              booking_number: booking.booking_number,
-              practitioner_id: booking.practitioner_id,
-              booking_status: booking.booking_status,
-              payment_status: booking.payment_status,
-              amount: Number(booking.amount),
-              service_name: booking.service_name,
-            },
-            commissionRate
-          );
-          await supabase
-            .from("practitioner_bookings")
-            .update({ payment_status: "Refunded", booking_status: "Cancelled" })
-            .eq("id", bookingId);
         }
       }
 
