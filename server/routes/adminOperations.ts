@@ -414,7 +414,9 @@ export function registerAdminOperationsRoutes(app: Express) {
       await dispatchUserNotification(supabase, {
         userId,
         event: "refund_approved",
-        message: "Your refund request has been approved. Funds will return within 7–10 business days.",
+        message: Number((refund as { refund_amount?: number | null }).refund_amount ?? 0) > 0
+          ? `Your refund of ₹${Number((refund as { refund_amount?: number | null }).refund_amount).toLocaleString("en-IN")} has been approved. Funds typically return within 7–10 business days.`
+          : "Your cancellation has been approved. No refund is due under the applicable cancellation policy.",
         linkRoute: "OrderHistory",
         emailVars: { reference: refundId },
       });
