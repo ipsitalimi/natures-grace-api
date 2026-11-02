@@ -91,7 +91,7 @@ export function calculateBookingRefund(params: {
   const freeCancellation = hoursUntilSession >= params.policy.freeCancellationHours;
   const feePercent = freeCancellation ? 0 : params.policy.cancellationFeePercent;
   const refundPercent = 100 - feePercent;
-  const refundAmountInr = Math.round((Math.max(0, params.amountInr) * refundPercent) * 100) / 100;
+  const refundAmountInr = Math.round((Math.max(0, params.amountInr) * refundPercent) / 100 * 100) / 100;
 
   return {
     sessionStartsAt: sessionStart.toISOString(),
