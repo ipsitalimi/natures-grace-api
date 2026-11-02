@@ -270,21 +270,17 @@ export async function reverseBookingEarning(
 }
 
 /**
- * Reverse the practitioner share proportionally for a partial booking refund.
- *
- * This function is intentionally separate from reverseBookingEarning(), which
- * remains the legacy full-refund path. The refund-request-linked unique index
- * added by migration 066 makes the ledger entry idempotent per request.
- *
- * The refund endpoint must call this only after Razorpay confirms the refund.
- * It must pass the actual amount refunded (INR), not the requested amount.
+ * Apply a proportional practitioner wallet reversal through a database RPC.
+ * The SQL function locks the wallet and applies the ledger row + balance update
+ * in one transaction, so retries cannot leave an inserted ledger entry without
+ * its corresponding wallet adjustment.
  */
 export async function reverseBookingEarningForRefund(
   supabase: SupabaseClient,
   booking: BookingRow,
   refundRequestId: string,
   refundAmountInr: number,
-  commissionRate: number
+  _commissionRate: number
 ): Promise<{ reversedAmount: number; error?: string }> {
   if (!booking.practitioner_id) return { reversedAmount: 0 };
 
@@ -297,109 +293,25 @@ export async function reverseBookingEarningForRefund(
     return { reversedAmount: 0, error: "Refund exceeds booking amount" };
   }
 
-  const wallet = await getOrCreatePractitionerWallet(
-    supabase,
-    booking.practitioner_id,
-    commissionRate
-  );
-  if (!wallet) return { reversedAmount: 0, error: "Practitioner wallet not found" };
+  const { data, error } = await supabase.rpc("apply_practitioner_booking_refund", {
+    p_refund_request_id: refundRequestId,
+    p_booking_id: booking.id,
+    p_refund_amount_inr: refundAmount,
+  });
 
-  const { data: alreadyProcessed } = await supabase
-    .from("practitioner_wallet_transactions")
-    .select("id, amount")
-    .eq("refund_request_id", refundRequestId)
-    .eq("category", "refund")
-    .maybeSingle();
+  if (error) return { reversedAmount: 0, error: error.message };
 
-  if (alreadyProcessed) {
-    return { reversedAmount: Number(alreadyProcessed.amount) };
+  const result = data as {
+    ok?: boolean;
+    error?: string;
+    reversed_amount?: number | string;
+  } | null;
+
+  if (!result?.ok) {
+    return { reversedAmount: 0, error: result?.error ?? "Wallet refund reversal failed" };
   }
 
-  const { data: earning } = await supabase
-    .from("practitioner_wallet_transactions")
-    .select("id, amount, is_released")
-    .eq("wallet_id", wallet.id)
-    .eq("booking_id", booking.id)
-    .eq("category", "booking_earning")
-    .maybeSingle();
-
-  if (!earning) return { reversedAmount: 0, error: "Original booking earning not found" };
-
-  const originalNetEarning = Math.round(Number(earning.amount) * 100) / 100;
-  const { data: previousRefunds, error: previousRefundsError } = await supabase
-    .from("practitioner_wallet_transactions")
-    .select("amount")
-    .eq("wallet_id", wallet.id)
-    .eq("booking_id", booking.id)
-    .eq("category", "refund");
-
-  if (previousRefundsError) return { reversedAmount: 0, error: previousRefundsError.message };
-
-  const alreadyReversed = Math.round(
-    (previousRefunds ?? []).reduce((sum, row) => sum + Number(row.amount), 0) * 100
-  ) / 100;
-  const remainingEarning = Math.max(0, originalNetEarning - alreadyReversed);
-  const requestedProportionalReversal = Math.round(
-    originalNetEarning * (refundAmount / bookingAmount) * 100
-  ) / 100;
-  const reversal = Math.min(remainingEarning, requestedProportionalReversal);
-
-  if (reversal <= 0) return { reversedAmount: 0 };
-
-  const { error: insertError } = await supabase
-    .from("practitioner_wallet_transactions")
-    .insert({
-      wallet_id: wallet.id,
-      booking_id: booking.id,
-      refund_request_id: refundRequestId,
-      type: "debit",
-      category: "refund",
-      amount: reversal,
-      description: `Partial refund reversal — ${booking.booking_number} (refund ${refundRequestId})`,
-      is_released: true,
-    });
-
-  if (insertError) {
-    // A concurrent retry may have inserted this refund request's unique ledger
-    // row. Read it back rather than applying wallet balance changes twice.
-    const { data: concurrentRow } = await supabase
-      .from("practitioner_wallet_transactions")
-      .select("id, amount")
-      .eq("refund_request_id", refundRequestId)
-      .eq("category", "refund")
-      .maybeSingle();
-
-    if (concurrentRow) return { reversedAmount: Number(concurrentRow.amount) };
-    return { reversedAmount: 0, error: insertError.message };
-  }
-
-  const { data: fresh } = await supabase
-    .from("practitioner_wallets")
-    .select("*")
-    .eq("id", wallet.id)
-    .single();
-
-  if (!fresh) return { reversedAmount: reversal, error: "Wallet balance update failed" };
-
-  const w = fresh as WalletRow;
-  const released = Boolean(earning.is_released);
-  const patch: Partial<WalletRow> = {
-    total_earned: Math.max(0, Number(w.total_earned) - reversal),
-  };
-
-  if (released) {
-    patch.available_balance = Number(w.available_balance) - reversal;
-  } else {
-    patch.held_balance = Number(w.held_balance) - reversal;
-  }
-
-  const { error: walletUpdateError } = await supabase
-    .from("practitioner_wallets")
-    .update(patch)
-    .eq("id", wallet.id);
-
-  if (walletUpdateError) return { reversedAmount: reversal, error: walletUpdateError.message };
-  return { reversedAmount: reversal };
+  return { reversedAmount: Number(result.reversed_amount ?? 0) };
 }
 
 export async function syncPractitionerWalletFromBookings(
