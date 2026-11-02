@@ -294,6 +294,12 @@ export function registerAdminOperationsRoutes(app: Express) {
           });
           if (!razorpayRefund.ok) {
             refundError = razorpayRefund.error;
+          } else {
+            const { error: auditError } = await supabase.from("refund_requests").update({
+              razorpay_refund_id: razorpayRefund.refundId,
+              refund_amount: Number(order.total),
+            }).eq("id", refundId);
+            if (auditError) refundError = auditError.message;
           }
         }
 
