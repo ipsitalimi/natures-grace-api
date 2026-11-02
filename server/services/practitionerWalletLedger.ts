@@ -327,10 +327,13 @@ export async function syncPractitionerWalletFromBookings(
     .eq("practitioner_id", practitionerId);
 
   for (const row of (bookings ?? []) as BookingRow[]) {
-    if (row.payment_status === "Refunded" || row.booking_status === "Cancelled") {
+    if (row.payment_status === "Refunded") {
       await reverseBookingEarning(supabase, row, commissionRate);
       continue;
     }
+    // A cancelled booking can have a partial or zero refund. Its refund ledger
+    // entries are authoritative; do not reverse the entire earning here.
+    if (row.booking_status === "Cancelled") continue;
     if (row.payment_status === "Paid" && isVerifiedBookingPaymentId(row.razorpay_payment_id)) {
       await creditBookingEarning(supabase, row, commissionRate);
       if (row.booking_status === "Completed") {
