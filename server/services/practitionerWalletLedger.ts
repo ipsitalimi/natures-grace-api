@@ -280,23 +280,25 @@ export async function reverseBookingEarningForRefund(
   booking: BookingRow,
   refundRequestId: string,
   refundAmountInr: number,
+  customerTotalPaidInr: number,
   _commissionRate: number
 ): Promise<{ reversedAmount: number; error?: string }> {
   if (!booking.practitioner_id) return { reversedAmount: 0 };
 
   const refundAmount = Math.round(Number(refundAmountInr) * 100) / 100;
-  const bookingAmount = Math.round(Number(booking.amount) * 100) / 100;
-  if (!Number.isFinite(refundAmount) || refundAmount <= 0 || bookingAmount <= 0) {
+  const customerTotalPaid = Math.round(Number(customerTotalPaidInr) * 100) / 100;
+  if (!Number.isFinite(refundAmount) || refundAmount <= 0 || customerTotalPaid <= 0) {
     return { reversedAmount: 0, error: "Invalid refund or booking amount" };
   }
-  if (refundAmount > bookingAmount) {
-    return { reversedAmount: 0, error: "Refund exceeds booking amount" };
+  if (refundAmount > customerTotalPaid) {
+    return { reversedAmount: 0, error: "Refund exceeds customer payment" };
   }
 
   const { data, error } = await supabase.rpc("apply_practitioner_booking_refund", {
     p_refund_request_id: refundRequestId,
     p_booking_id: booking.id,
     p_refund_amount_inr: refundAmount,
+    p_customer_total_paid_inr: customerTotalPaid,
   });
 
   if (error) return { reversedAmount: 0, error: error.message };
