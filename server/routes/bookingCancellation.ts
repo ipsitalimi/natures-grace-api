@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { requireBearerUser } from "../middleware/auth";
 import { requireSupabaseAdmin } from "../lib/supabaseAdmin";
+import { calculateBookingRefund, fetchBookingCancellationPolicy } from "../services/bookingCancellationPolicy";
 
 export function registerBookingCancellationRoutes(app: Express): void {
   app.post("/api/bookings/:id/cancel", async (req: Request, res: Response) => {
@@ -12,10 +13,51 @@ export function registerBookingCancellationRoutes(app: Express): void {
     if (!bookingId) return res.status(400).json({ error: "Booking id is required" });
 
     const supabase = requireSupabaseAdmin();
+    const { data: booking, error: bookingError } = await supabase
+      .from("practitioner_bookings")
+      .select("id, user_id, payment_status, amount, session_date, session_time")
+      .eq("id", bookingId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (bookingError || !booking) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
+
+    let policySnapshot: Record<string, unknown> | null = null;
+    let refundAmount: number | null = null;
+    if (booking.payment_status === "Paid") {
+      const policy = await fetchBookingCancellationPolicy(supabase);
+      const calculation = calculateBookingRefund({
+        amountInr: Number(booking.amount),
+        sessionDate: String(booking.session_date ?? ""),
+        sessionTime: String(booking.session_time ?? ""),
+        policy,
+      });
+      if ("error" in calculation) {
+        return res.status(400).json({ error: calculation.error });
+      }
+      refundAmount = calculation.refundAmountInr;
+      policySnapshot = {
+        freeCancellationHours: policy.freeCancellationHours,
+        cancellationFeePercent: policy.cancellationFeePercent,
+        sessionStartsAt: calculation.sessionStartsAt,
+        hoursUntilSession: calculation.hoursUntilSession,
+        freeCancellation: calculation.freeCancellation,
+        appliedFeePercent: calculation.cancellationFeePercent,
+        refundPercent: calculation.refundPercent,
+        bookingAmountInr: Number(booking.amount),
+        refundAmountInr: calculation.refundAmountInr,
+        calculatedAt: new Date().toISOString(),
+      };
+    }
+
     const { data, error } = await supabase.rpc("cancel_user_practitioner_booking", {
       p_booking_id: bookingId,
       p_user_id: user.id,
       p_description: notes?.trim() || null,
+      p_cancellation_policy_snapshot: policySnapshot,
+      p_refund_amount: refundAmount,
     });
 
     if (error) {
