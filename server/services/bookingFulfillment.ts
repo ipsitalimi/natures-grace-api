@@ -16,6 +16,12 @@ export type BookingDraft = {
   sessionTime: string;
   durationMinutes: number;
   amountInr: number;
+  feeBreakdown?: {
+    serviceAmountInr: number;
+    platformFeeInr: number;
+    platformGstInr: number;
+    totalInr: number;
+  };
   notes?: string;
 };
 
@@ -73,9 +79,7 @@ export async function fulfillBookingPayment(params: {
     }
   }
 
-  const draft: BookingDraft | undefined =
-    params.booking ??
-    (pending?.booking_draft as BookingDraft | undefined);
+  const draft: BookingDraft | undefined = pending?.booking_draft as BookingDraft | undefined;
 
   if (!draft) {
     return { ok: false, error: "Booking draft not found for payment" };
@@ -111,6 +115,9 @@ export async function fulfillBookingPayment(params: {
     sessionTime: draft.sessionTime,
     durationMinutes: Number(draft.durationMinutes),
     amount: Number(draft.amountInr),
+    platformFeeInr: Number(draft.feeBreakdown?.platformFeeInr ?? 0),
+    platformGstInr: Number(draft.feeBreakdown?.platformGstInr ?? 0),
+    totalPaidAmountInr: Number(draft.feeBreakdown?.totalInr ?? draft.amountInr),
     razorpayPaymentId: paymentId,
     notes: draft.notes,
   });
