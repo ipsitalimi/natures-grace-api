@@ -338,36 +338,51 @@ export function registerAdminOperationsRoutes(app: Express) {
         if (!booking) {
           refundError = "Booking not found";
         } else {
-          const policy = await fetchBookingCancellationPolicy(supabase);
-          const calculation = calculateBookingRefund({
-            amountInr: Number(booking.amount),
-            sessionDate: String(booking.session_date ?? ""),
-            sessionTime: String(booking.session_time ?? ""),
-            policy,
-          });
-          if ("error" in calculation) {
-            refundError = calculation.error;
-          } else if (calculation.refundAmountInr > 0 && !booking.razorpay_payment_id) {
-            refundError = "Booking has no Razorpay payment ID — process refund manually";
+          const savedSnapshot = (existing as { cancellation_policy_snapshot?: Record<string, unknown> | null }).cancellation_policy_snapshot;
+          let policySnapshot: Record<string, unknown>;
+          let refundAmountInr: number;
+
+          if (savedSnapshot && typeof savedSnapshot.refundAmountInr === "number") {
+            policySnapshot = savedSnapshot;
+            refundAmountInr = Number((existing as { refund_amount?: number | null }).refund_amount ?? savedSnapshot.refundAmountInr);
           } else {
-            const policySnapshot = {
-              freeCancellationHours: policy.freeCancellationHours,
-              cancellationFeePercent: policy.cancellationFeePercent,
-              sessionStartsAt: calculation.sessionStartsAt,
-              hoursUntilSession: calculation.hoursUntilSession,
-              freeCancellation: calculation.freeCancellation,
-              appliedFeePercent: calculation.cancellationFeePercent,
-              refundPercent: calculation.refundPercent,
-              bookingAmountInr: Number(booking.amount),
-              refundAmountInr: calculation.refundAmountInr,
-            };
-            const { error: snapshotError } = await supabase.from("refund_requests").update({
-              cancellation_policy_snapshot: policySnapshot, refund_amount: calculation.refundAmountInr,
-            }).eq("id", refundId);
-            if (snapshotError) refundError = snapshotError.message;
-            if (!refundError && calculation.refundAmountInr > 0) {
+            const policy = await fetchBookingCancellationPolicy(supabase);
+            const calculation = calculateBookingRefund({
+              amountInr: Number(booking.amount),
+              sessionDate: String(booking.session_date ?? ""),
+              sessionTime: String(booking.session_time ?? ""),
+              policy,
+            });
+            if ("error" in calculation) {
+              refundError = calculation.error;
+              policySnapshot = {};
+              refundAmountInr = 0;
+            } else {
+              refundAmountInr = refundAmountInr;
+              policySnapshot = {
+                freeCancellationHours: policy.freeCancellationHours,
+                cancellationFeePercent: policy.cancellationFeePercent,
+                sessionStartsAt: calculation.sessionStartsAt,
+                hoursUntilSession: calculation.hoursUntilSession,
+                freeCancellation: calculation.freeCancellation,
+                appliedFeePercent: calculation.cancellationFeePercent,
+                refundPercent: calculation.refundPercent,
+                bookingAmountInr: Number(booking.amount),
+                refundAmountInr,
+              };
+              const { error: snapshotError } = await supabase.from("refund_requests").update({
+                cancellation_policy_snapshot: policySnapshot, refund_amount: refundAmountInr,
+              }).eq("id", refundId);
+              if (snapshotError) refundError = snapshotError.message;
+            }
+          }
+
+          if (!refundError && refundAmountInr > 0 && !booking.razorpay_payment_id) {
+            refundError = "Booking has no Razorpay payment ID — process refund manually";
+          } else if (!refundError) {
+            if (!refundError && refundAmountInr > 0) {
               const gatewayRefund = await createRazorpayRefund({
-                paymentId: booking.razorpay_payment_id as string, amountInr: calculation.refundAmountInr,
+                paymentId: booking.razorpay_payment_id as string, amountInr: refundAmountInr,
                 notes: { refund_request_id: refundId },
               });
               if (!gatewayRefund.ok) refundError = gatewayRefund.error;
@@ -377,16 +392,16 @@ export function registerAdminOperationsRoutes(app: Express) {
                 if (refundIdError) refundError = refundIdError.message;
               }
             }
-            if (!refundError && calculation.refundAmountInr > 0) {
+            if (!refundError && refundAmountInr > 0) {
               const reversal = await reverseBookingEarningForRefund(supabase, {
                 id: booking.id, booking_number: booking.booking_number, practitioner_id: booking.practitioner_id,
                 booking_status: booking.booking_status, payment_status: booking.payment_status,
                 amount: Number(booking.amount), service_name: booking.service_name,
-              }, refundId, calculation.refundAmountInr, commissionRate);
+              }, refundId, refundAmountInr, commissionRate);
               if (reversal.error) refundError = reversal.error;
             }
             if (!refundError) {
-              const fullRefund = calculation.refundAmountInr >= Number(booking.amount);
+              const fullRefund = refundAmountInr >= Number(booking.amount);
               const { error: bookingUpdateError } = await supabase.from("practitioner_bookings").update({
                 booking_status: "Cancelled", payment_status: fullRefund ? "Refunded" : booking.payment_status,
               }).eq("id", bookingId);
