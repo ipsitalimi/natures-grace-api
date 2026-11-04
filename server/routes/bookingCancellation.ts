@@ -15,7 +15,7 @@ export function registerBookingCancellationRoutes(app: Express): void {
     const supabase = requireSupabaseAdmin();
     const { data: booking, error: bookingError } = await supabase
       .from("practitioner_bookings")
-      .select("id, user_id, payment_status, amount, session_date, session_time")
+      .select("id, user_id, payment_status, amount, total_paid_amount_inr, session_date, session_time")
       .eq("id", bookingId)
       .eq("user_id", user.id)
       .maybeSingle();
@@ -29,7 +29,7 @@ export function registerBookingCancellationRoutes(app: Express): void {
     if (booking.payment_status === "Paid") {
       const policy = await fetchBookingCancellationPolicy(supabase);
       const calculation = calculateBookingRefund({
-        amountInr: Number(booking.amount),
+        amountInr: Number((booking as { total_paid_amount_inr?: number | null }).total_paid_amount_inr ?? booking.amount),
         sessionDate: String(booking.session_date ?? ""),
         sessionTime: String(booking.session_time ?? ""),
         policy,
@@ -46,7 +46,7 @@ export function registerBookingCancellationRoutes(app: Express): void {
         freeCancellation: calculation.freeCancellation,
         appliedFeePercent: calculation.cancellationFeePercent,
         refundPercent: calculation.refundPercent,
-        bookingAmountInr: Number(booking.amount),
+        bookingAmountInr: Number((booking as { total_paid_amount_inr?: number | null }).total_paid_amount_inr ?? booking.amount),
         refundAmountInr: calculation.refundAmountInr,
         calculatedAt: new Date().toISOString(),
       };
