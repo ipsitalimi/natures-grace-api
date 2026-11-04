@@ -397,7 +397,9 @@ export function registerAdminOperationsRoutes(app: Express) {
                 id: booking.id, booking_number: booking.booking_number, practitioner_id: booking.practitioner_id,
                 booking_status: booking.booking_status, payment_status: booking.payment_status,
                 amount: Number(booking.amount), service_name: booking.service_name,
-              }, refundId, refundAmountInr, commissionRate);
+              }, refundId, refundAmountInr,
+              Number((booking as { total_paid_amount_inr?: number | null }).total_paid_amount_inr ?? booking.amount),
+              commissionRate);
               if (reversal.error) refundError = reversal.error;
             }
             if (!refundError) {
