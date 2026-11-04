@@ -509,6 +509,9 @@ export async function createPaidBooking(
     sessionTime: string;
     durationMinutes: number;
     amount: number;
+    platformFeeInr?: number;
+    platformGstInr?: number;
+    totalPaidAmountInr?: number;
     razorpayPaymentId: string;
     notes?: string;
   }
@@ -535,6 +538,9 @@ export async function createPaidBooking(
       session_time: input.sessionTime,
       duration_minutes: input.durationMinutes,
       amount: input.amount,
+      platform_fee_inr: input.platformFeeInr ?? 0,
+      platform_gst_inr: input.platformGstInr ?? 0,
+      total_paid_amount_inr: input.totalPaidAmountInr ?? input.amount,
       booking_status: "Confirmed",
       payment_status: "Paid",
       razorpay_payment_id: input.razorpayPaymentId,
