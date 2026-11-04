@@ -11,7 +11,7 @@ import {
   savePendingBookingCheckout,
   type BookingDraft,
 } from "../services/bookingFulfillment";
-import { fetchCommissionRate } from "../services/platformSettings";
+import { calculateCheckoutTotal, fetchCheckoutFeeSettings, fetchCommissionRate } from "../services/platformSettings";
 
 async function validateBookingAmount(
   practitionerId: string,
@@ -114,8 +114,12 @@ async function handleCreateOrder(req: Request, res: Response) {
       return res.status(400).json({ error: validated.error });
     }
 
+    const supabase = requireSupabaseAdmin();
+    const feeSettings = await fetchCheckoutFeeSettings(supabase);
+    const feeBreakdown = calculateCheckoutTotal(validated.amountInr, feeSettings);
+
     const result = await createBookingOrder({
-      amountInr: validated.amountInr,
+      amountInr: feeBreakdown.totalInr,
       receipt: body.receipt ?? `bk_${user.id.slice(0, 8)}_${Date.now()}`,
       notes: {
         practitioner_id: body.practitionerId,
@@ -128,13 +132,11 @@ async function handleCreateOrder(req: Request, res: Response) {
     }
 
     if (body.booking) {
-      const supabase = requireSupabaseAdmin();
-      await savePendingBookingCheckout(
-        supabase,
-        user.id,
-        result.orderId,
-        { ...body.booking, amountInr: validated.amountInr }
-      );
+      await savePendingBookingCheckout(supabase, user.id, result.orderId, {
+        ...body.booking,
+        amountInr: validated.amountInr,
+        feeBreakdown,
+      });
     }
 
     const keyId = process.env.RAZORPAY_KEY_ID?.trim() ?? null;
@@ -143,6 +145,9 @@ async function handleCreateOrder(req: Request, res: Response) {
       orderId: result.orderId,
       amountPaise: result.amountPaise,
       amountInr: validated.amountInr,
+      platformFeeInr: feeBreakdown.platformFeeInr,
+      platformGstInr: feeBreakdown.platformGstInr,
+      totalInr: feeBreakdown.totalInr,
       currency: result.currency,
       devMode: result.devMode ?? false,
       keyId,
@@ -175,17 +180,28 @@ async function handleConfirmPayment(req: Request, res: Response) {
       emailPresent: Boolean(user.email),
     });
 
-    const { orderId, paymentId, signature, devMode, booking } = req.body as {
+    const { orderId, paymentId, signature, devMode } = req.body as {
       orderId?: string;
       paymentId?: string;
       signature?: string;
       devMode?: boolean;
-      booking?: BookingDraft;
     };
 
-    if (!orderId || !booking) {
-      return res.status(400).json({ error: "orderId and booking are required" });
+    if (!orderId) return res.status(400).json({ error: "orderId is required" });
+
+    const supabase = requireSupabaseAdmin();
+    const { data: pending, error: pendingError } = await supabase
+      .from("pending_booking_checkouts")
+      .select("user_id, booking_draft, fulfilled_at, booking_id")
+      .eq("razorpay_order_id", orderId)
+      .maybeSingle();
+
+    if (pendingError || !pending || pending.user_id !== user.id) {
+      return res.status(404).json({ error: "Checkout not found for this account" });
     }
+
+    const booking = pending.booking_draft as BookingDraft | null;
+    if (!booking) return res.status(400).json({ error: "Saved booking draft missing" });
 
     const validated = await validateBookingAmount(
       booking.practitionerId,
@@ -193,9 +209,11 @@ async function handleConfirmPayment(req: Request, res: Response) {
       Number(booking.amountInr),
       booking.offeringId
     );
+    if (!validated.ok) return res.status(400).json({ error: validated.error });
 
-    if (!validated.ok) {
-      return res.status(400).json({ error: validated.error });
+    const snapshot = booking.feeBreakdown;
+    if (!snapshot || snapshot.serviceAmountInr !== validated.amountInr) {
+      return res.status(400).json({ error: "Checkout fee snapshot is invalid" });
     }
 
     const verified = await confirmBookingPayment({
@@ -203,27 +221,21 @@ async function handleConfirmPayment(req: Request, res: Response) {
       paymentId: paymentId ?? "",
       signature,
       devMode,
+      expectedAmountPaise: Math.round(Number(snapshot.totalInr) * 100),
     });
 
-    if (!verified.ok) {
-      return res.status(400).json({ error: verified.error });
-    }
+    if (!verified.ok) return res.status(400).json({ error: verified.error });
 
-    const supabase = requireSupabaseAdmin();
     const commissionRate = await fetchCommissionRate(supabase);
-
     const created = await fulfillBookingPayment({
       supabase,
       userId: user.id,
       razorpayOrderId: orderId,
       paymentId: verified.paymentId,
-      booking: { ...booking, amountInr: validated.amountInr },
       commissionRate,
     });
 
-    if (!created.ok) {
-      return res.status(500).json({ error: created.error });
-    }
+    if (!created.ok) return res.status(500).json({ error: created.error });
 
     return res.json({
       paymentId: verified.paymentId,
