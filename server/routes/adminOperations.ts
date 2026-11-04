@@ -358,7 +358,7 @@ export function registerAdminOperationsRoutes(app: Express) {
               policySnapshot = {};
               refundAmountInr = 0;
             } else {
-              refundAmountInr = refundAmountInr;
+              refundAmountInr = calculation.refundAmountInr;
               policySnapshot = {
                 freeCancellationHours: policy.freeCancellationHours,
                 cancellationFeePercent: policy.cancellationFeePercent,
