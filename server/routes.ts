@@ -4,6 +4,7 @@ import { registerPayoutRoutes } from "./routes/payouts";
 import { registerPractitionerPayoutRoutes } from "./routes/practitionerPayouts";
 import { registerBookingCheckoutRoutes } from "./routes/bookingCheckout";
 import { registerBookingCancellationRoutes } from "./routes/bookingCancellation";
+import { registerBookingRescheduleRoutes } from "./routes/bookingReschedule";
 import { registerStoreCheckoutRoutes } from "./routes/storeCheckout";
 import { registerWalletLedgerRoutes } from "./routes/walletLedger";
 import { registerAdminOperationsRoutes } from "./routes/adminOperations";
@@ -16,6 +17,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerPractitionerPayoutRoutes(app);
   registerBookingCheckoutRoutes(app);
   registerBookingCancellationRoutes(app);
+  registerBookingRescheduleRoutes(app);
   registerStoreCheckoutRoutes(app);
   registerWalletLedgerRoutes(app);
   registerAdminOperationsRoutes(app);
