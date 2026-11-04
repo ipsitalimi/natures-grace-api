@@ -1,7 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { requireBearerUser } from "../middleware/auth";
 import { requireSupabaseAdmin } from "../lib/supabaseAdmin";
-import { getBookingSessionStart } from "../services/bookingCancellationPolicy";
 
 const RESCHEDULE_DEADLINE_HOURS = 36;
 
