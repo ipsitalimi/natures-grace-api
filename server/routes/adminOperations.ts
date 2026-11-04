@@ -330,7 +330,7 @@ export function registerAdminOperationsRoutes(app: Express) {
         const { data: booking } = await supabase
           .from("practitioner_bookings")
           .select(
-            "id, booking_number, practitioner_id, booking_status, payment_status, amount, service_name, razorpay_payment_id, session_date, session_time"
+            "id, booking_number, practitioner_id, booking_status, payment_status, amount, total_paid_amount_inr, service_name, razorpay_payment_id, session_date, session_time"
           )
           .eq("id", bookingId)
           .maybeSingle();
@@ -403,7 +403,7 @@ export function registerAdminOperationsRoutes(app: Express) {
               if (reversal.error) refundError = reversal.error;
             }
             if (!refundError) {
-              const fullRefund = refundAmountInr >= Number(booking.amount);
+              const fullRefund = refundAmountInr >= Number((booking as { total_paid_amount_inr?: number | null }).total_paid_amount_inr ?? booking.amount);
               const { error: bookingUpdateError } = await supabase.from("practitioner_bookings").update({
                 booking_status: "Cancelled", payment_status: fullRefund ? "Refunded" : booking.payment_status,
               }).eq("id", bookingId);
