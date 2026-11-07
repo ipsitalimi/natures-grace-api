@@ -42,36 +42,32 @@ export async function restoreOrderStock(
   if (!result?.ok) throw new Error(result?.error ?? "Order stock restoration failed");
 }
 
-async function adjustPromoUsage(
+async function restorePromoUsage(
   supabase: SupabaseClient,
+  orderId: string,
   promoId: string,
-  table: "seller_promos" | "platform_promo_codes",
-  delta: number
+  promoType: "seller" | "platform"
 ): Promise<void> {
-  const { data: promoRow } = await supabase
-    .from(table)
-    .select("usage_count")
-    .eq("id", promoId)
-    .maybeSingle();
-  const current = promoRow?.usage_count;
-  if (typeof current === "number") {
-    await supabase
-      .from(table)
-      .update({ usage_count: Math.max(0, current + delta) })
-      .eq("id", promoId);
-  }
+  const { data, error } = await supabase.rpc("restore_store_order_promo_usage", {
+    p_order_id: orderId,
+    p_promo_id: promoId,
+    p_promo_type: promoType,
+  });
+  if (error) throw new Error(`Promo usage restoration failed: ${error.message}`);
+  const result = data as { ok?: boolean; error?: string } | null;
+  if (!result?.ok) throw new Error(result?.error ?? "Promo usage restoration failed");
 }
 
 /** Decrement promo usage counters after a refunded order. */
 export async function restorePromoUsageOnRefund(
   supabase: SupabaseClient,
-  order: Pick<StoreOrderRow, "seller_promo_id" | "platform_promo_id">
+  order: Pick<StoreOrderRow, "id" | "seller_promo_id" | "platform_promo_id">
 ): Promise<void> {
   if (order.seller_promo_id) {
-    await adjustPromoUsage(supabase, order.seller_promo_id, "seller_promos", -1);
+    await restorePromoUsage(supabase, order.id, order.seller_promo_id, "seller");
   }
   if (order.platform_promo_id) {
-    await adjustPromoUsage(supabase, order.platform_promo_id, "platform_promo_codes", -1);
+    await restorePromoUsage(supabase, order.id, order.platform_promo_id, "platform");
   }
 }
 
