@@ -13,6 +13,8 @@ type StoreOrderRow = {
   total: number;
   seller_promo_id?: string | null;
   platform_promo_id?: string | null;
+  razorpay_order_id?: string | null;
+  razorpay_payment_id?: string | null;
 };
 
 async function decrementOrderStock(
@@ -129,7 +131,7 @@ export async function fulfillStoreOrderPayment(params: {
   const { data: existing, error: fetchError } = await supabase
     .from("orders")
     .select(
-      "id, order_number, user_id, payment_status, status, seller_id, total, seller_promo_id, platform_promo_id"
+      "id, order_number, user_id, payment_status, status, seller_id, total, seller_promo_id, platform_promo_id, razorpay_order_id, razorpay_payment_id"
     )
     .eq("id", storeOrderId)
     .maybeSingle();
@@ -140,27 +142,34 @@ export async function fulfillStoreOrderPayment(params: {
 
   const order = existing as StoreOrderRow;
 
-  if (order.payment_status === "Paid") {
-    return { ok: true, orderNumber: order.order_number as string, alreadyPaid: true };
+  let alreadyPaid = order.payment_status === "Paid";
+  if (alreadyPaid && (
+    order.razorpay_order_id !== razorpayOrderId ||
+    order.razorpay_payment_id !== paymentId
+  )) {
+    return { ok: false, error: "Paid order does not match this Razorpay payment" };
   }
 
-  if (order.payment_status !== "Pending") {
+  if (!alreadyPaid && order.payment_status !== "Pending") {
     return { ok: false, error: "Order is not awaiting payment" };
   }
 
-  const { data: updated, error: updateError } = await supabase
-    .from("orders")
-    .update({
-      payment_status: "Paid",
-      razorpay_order_id: razorpayOrderId,
-      razorpay_payment_id: paymentId,
-    })
-    .eq("id", storeOrderId)
-    .eq("payment_status", "Pending")
-    .select(
-      "id, order_number, user_id, payment_status, status, seller_id, total, seller_promo_id, platform_promo_id"
-    )
-    .maybeSingle();
+  let updated: StoreOrderRow | null = null;
+  if (!alreadyPaid) {
+    const { data: paidOrder, error: updateError } = await supabase
+      .from("orders")
+      .update({
+        payment_status: "Paid",
+        razorpay_order_id: razorpayOrderId,
+        razorpay_payment_id: paymentId,
+      })
+      .eq("id", storeOrderId)
+      .eq("payment_status", "Pending")
+      .select(
+        "id, order_number, user_id, payment_status, status, seller_id, total, seller_promo_id, platform_promo_id, razorpay_order_id, razorpay_payment_id"
+      )
+      .maybeSingle();
+    updated = paidOrder as StoreOrderRow | null;
 
   if (updateError) {
     return { ok: false, error: updateError.message };
@@ -174,17 +183,22 @@ export async function fulfillStoreOrderPayment(params: {
       .maybeSingle();
 
     if (recheck?.payment_status === "Paid") {
-      return {
-        ok: true,
-        orderNumber: recheck.order_number as string,
-        alreadyPaid: true,
-      };
+      const { data: paidRow } = await supabase
+        .from("orders")
+        .select("id, order_number, user_id, payment_status, status, seller_id, total, seller_promo_id, platform_promo_id, razorpay_order_id, razorpay_payment_id")
+        .eq("id", storeOrderId)
+        .maybeSingle();
+      if (!paidRow || paidRow.razorpay_order_id !== razorpayOrderId || paidRow.razorpay_payment_id !== paymentId) {
+        return { ok: false, error: "Paid order does not match this Razorpay payment" };
+      }
+      updated = paidRow as StoreOrderRow;
+      alreadyPaid = true;
+    } else {
+      return { ok: false, error: "Order is not awaiting payment" };
     }
-
-    return { ok: false, error: "Order is not awaiting payment" };
   }
 
-  const orderAfterPay = updated as StoreOrderRow;
+  const orderAfterPay = (updated ?? order) as StoreOrderRow;
 
   const commissionRate =
     params.commissionRate ?? (await fetchCommissionRate(supabase));
@@ -205,7 +219,7 @@ export async function fulfillStoreOrderPayment(params: {
     commissionRate
   );
 
-  await dispatchUserNotification(supabase, {
+  if (!alreadyPaid) await dispatchUserNotification(supabase, {
     userId: orderAfterPay.user_id,
     event: "order_confirmed",
     message: `Order ${orderAfterPay.order_number} confirmed. Payment received.`,
@@ -217,11 +231,11 @@ export async function fulfillStoreOrderPayment(params: {
     },
   });
 
-  await notifySellerNewOrder(supabase, orderAfterPay);
+  if (!alreadyPaid) await notifySellerNewOrder(supabase, orderAfterPay);
 
   return {
     ok: true,
     orderNumber: orderAfterPay.order_number as string,
-    alreadyPaid: false,
+    alreadyPaid,
   };
 }
