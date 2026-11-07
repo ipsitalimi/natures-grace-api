@@ -102,30 +102,14 @@ export async function creditOrderEarning(
 ): Promise<void> {
   if (order.payment_status !== "Paid" || !order.seller_id) return;
 
-  const wallet = await getOrCreateSellerWallet(supabase, order.seller_id, commissionRate);
-  if (!wallet) return;
-
-  if (await hasTransaction(supabase, wallet.id, order.id, "order_earning")) return;
-
-  const net = netEarning(Number(order.total), commissionRate);
-  const productName = await loadOrderItemsLabel(supabase, order.id);
-
-  const { error } = await supabase.from("wallet_transactions").insert({
-    wallet_id: wallet.id,
-    order_id: order.id,
-    type: "credit",
-    category: "order_earning",
-    amount: net,
-    description: `Order ${order.order_number} — ${productName}`,
-    is_released: false,
+  const { data, error } = await supabase.rpc("credit_seller_order_earning", {
+    p_order_id: order.id,
+    p_commission_rate: commissionRate,
   });
 
-  if (error) return;
-
-  await updateWalletBalances(supabase, wallet.id, {
-    total_earned: Number(wallet.total_earned) + net,
-    held_balance: Number(wallet.held_balance) + net,
-  });
+  if (error) throw new Error(`Seller earning credit failed: ${error.message}`);
+  const result = data as { ok?: boolean; error?: string } | null;
+  if (!result?.ok) throw new Error(result?.error ?? "Seller earning credit failed");
 
   if (order.status === "Delivered") {
     await releaseOrderEarning(supabase, order, commissionRate);
