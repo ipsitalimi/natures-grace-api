@@ -135,14 +135,6 @@ export async function confirmStoreOrderPayment(params: {
     return { ok: false, error: verified.error };
   }
 
-  if (existing.payment_status === "Paid") {
-    return {
-      ok: true,
-      paymentId: verified.paymentId,
-      orderNumber: existing.order_number as string,
-    };
-  }
-
   const fulfilled = await fulfillStoreOrderPayment({
     supabase,
     storeOrderId: params.storeOrderId,
