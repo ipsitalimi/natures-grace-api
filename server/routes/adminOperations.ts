@@ -23,66 +23,35 @@ async function updateSellerPayoutStatus(
   rejectionReason?: string
 ) {
   const supabase = requireSupabaseAdmin();
-
-  const { data: payout } = await supabase
+  const { data: payout, error: fetchError } = await supabase
     .from("seller_payouts")
-    .select("*, seller_wallets(seller_id, sellers(profile_id))")
+    .select("amount, seller_wallets(sellers(profile_id))")
     .eq("id", payoutId)
     .maybeSingle();
-
+  if (fetchError) return { error: fetchError.message };
   if (!payout) return { error: "Payout not found" };
 
-  const patch: Record<string, unknown> = {
-    status,
-    processed_by: adminId,
-    updated_at: new Date().toISOString(),
-  };
-  if (status === "Completed") patch.completed_at = new Date().toISOString();
-  if (status === "Rejected") {
-    patch.rejection_reason = rejectionReason ?? "Rejected by admin";
-    const amount = Number((payout as { amount: number }).amount);
-    const walletId = (payout as { wallet_id: string }).wallet_id;
-    const { data: wallet } = await supabase
-      .from("seller_wallets")
-      .select("available_balance, pending_payout")
-      .eq("id", walletId)
-      .single();
-    if (wallet) {
-      await supabase
-        .from("seller_wallets")
-        .update({
-          available_balance: Number(wallet.available_balance) + amount,
-          pending_payout: Math.max(0, Number(wallet.pending_payout) - amount),
-        })
-        .eq("id", walletId);
-    }
-  }
+  const { data, error } = await supabase.rpc("admin_update_payout_status", {
+    p_payout_type: "seller", p_payout_id: payoutId, p_status: status,
+    p_admin_id: adminId, p_rejection_reason: rejectionReason ?? null,
+  });
+  if (error) return { error: error.message };
+  const result = data as { ok?: boolean; error?: string } | null;
+  if (!result?.ok) return { error: result?.error ?? "Could not update payout status" };
 
-  await supabase.from("seller_payouts").update(patch).eq("id", payoutId);
-
-  const profileId =
-    (payout as { seller_wallets?: { sellers?: { profile_id?: string } } }).seller_wallets?.sellers
-      ?.profile_id ?? null;
-
+  const profileId = (payout as { seller_wallets?: { sellers?: { profile_id?: string } } })
+    .seller_wallets?.sellers?.profile_id ?? null;
   if (profileId) {
     const amountStr = `₹${Number((payout as { amount: number }).amount).toLocaleString("en-IN")}`;
-    if (status === "Completed") {
-      await dispatchUserNotification(supabase, {
-        userId: profileId,
-        event: "withdrawal_completed",
-        message: `Your withdrawal of ${amountStr} has been completed.`,
-        linkRoute: "Main",
-      });
-    } else if (status === "Rejected") {
-      await dispatchUserNotification(supabase, {
-        userId: profileId,
-        event: "withdrawal_received",
-        message: `Your withdrawal request was not approved. Funds returned to your wallet.`,
-        linkRoute: "Main",
-      });
-    }
+    if (status === "Completed") await dispatchUserNotification(supabase, {
+      userId: profileId, event: "withdrawal_completed",
+      message: `Your withdrawal of ${amountStr} has been completed.`, linkRoute: "Main",
+    });
+    else if (status === "Rejected") await dispatchUserNotification(supabase, {
+      userId: profileId, event: "withdrawal_received",
+      message: "Your withdrawal request was not approved. Funds returned to your wallet.", linkRoute: "Main",
+    });
   }
-
   return { ok: true };
 }
 
@@ -93,57 +62,31 @@ async function updatePractitionerPayoutStatus(
   rejectionReason?: string
 ) {
   const supabase = requireSupabaseAdmin();
-
-  const { data: payout } = await supabase
+  const { data: payout, error: fetchError } = await supabase
     .from("practitioner_payouts")
-    .select("*, practitioner_wallets(practitioner_id, practitioners(profile_id))")
+    .select("amount, practitioner_wallets(practitioners(profile_id))")
     .eq("id", payoutId)
     .maybeSingle();
-
+  if (fetchError) return { error: fetchError.message };
   if (!payout) return { error: "Payout not found" };
 
-  const patch: Record<string, unknown> = {
-    status,
-    processed_by: adminId,
-    updated_at: new Date().toISOString(),
-  };
-  if (status === "Completed") patch.completed_at = new Date().toISOString();
-  if (status === "Rejected") {
-    patch.rejection_reason = rejectionReason ?? "Rejected by admin";
-    const amount = Number((payout as { amount: number }).amount);
-    const walletId = (payout as { wallet_id: string }).wallet_id;
-    const { data: wallet } = await supabase
-      .from("practitioner_wallets")
-      .select("available_balance, pending_payout")
-      .eq("id", walletId)
-      .single();
-    if (wallet) {
-      await supabase
-        .from("practitioner_wallets")
-        .update({
-          available_balance: Number(wallet.available_balance) + amount,
-          pending_payout: Math.max(0, Number(wallet.pending_payout) - amount),
-        })
-        .eq("id", walletId);
-    }
-  }
+  const { data, error } = await supabase.rpc("admin_update_payout_status", {
+    p_payout_type: "practitioner", p_payout_id: payoutId, p_status: status,
+    p_admin_id: adminId, p_rejection_reason: rejectionReason ?? null,
+  });
+  if (error) return { error: error.message };
+  const result = data as { ok?: boolean; error?: string } | null;
+  if (!result?.ok) return { error: result?.error ?? "Could not update payout status" };
 
-  await supabase.from("practitioner_payouts").update(patch).eq("id", payoutId);
-
-  const profileId =
-    (payout as { practitioner_wallets?: { practitioners?: { profile_id?: string } } })
-      .practitioner_wallets?.practitioners?.profile_id ?? null;
-
+  const profileId = (payout as { practitioner_wallets?: { practitioners?: { profile_id?: string } } })
+    .practitioner_wallets?.practitioners?.profile_id ?? null;
   if (profileId && status === "Completed") {
     const amountStr = `₹${Number((payout as { amount: number }).amount).toLocaleString("en-IN")}`;
     await dispatchUserNotification(supabase, {
-      userId: profileId,
-      event: "withdrawal_completed",
-      message: `Your withdrawal of ${amountStr} has been completed.`,
-      linkRoute: "Main",
+      userId: profileId, event: "withdrawal_completed",
+      message: `Your withdrawal of ${amountStr} has been completed.`, linkRoute: "Main",
     });
   }
-
   return { ok: true };
 }
 
