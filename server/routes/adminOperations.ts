@@ -318,6 +318,7 @@ export function registerAdminOperationsRoutes(app: Express) {
           );
           await restoreOrderStock(supabase, orderId);
           await restorePromoUsageOnRefund(supabase, {
+            id: orderId,
             seller_promo_id: (order as { seller_promo_id?: string | null }).seller_promo_id ?? null,
             platform_promo_id: (order as { platform_promo_id?: string | null }).platform_promo_id ?? null,
           });
