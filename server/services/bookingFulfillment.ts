@@ -1,8 +1,4 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import {
-  createPaidBooking,
-  creditBookingEarning,
-} from "./practitionerWalletLedger";
 import { dispatchUserNotification } from "./notificationDispatch";
 import { fetchCommissionRate } from "./platformSettings";
 
