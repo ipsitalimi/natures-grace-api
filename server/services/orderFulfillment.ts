@@ -19,38 +19,12 @@ async function decrementOrderStock(
   supabase: SupabaseClient,
   orderId: string
 ): Promise<void> {
-  const { data: items } = await supabase
-    .from("order_items")
-    .select("product_id, quantity")
-    .eq("order_id", orderId);
-
-  for (const item of items ?? []) {
-    const productId = (item as { product_id: string }).product_id;
-    const qty = Number((item as { quantity: number }).quantity) || 0;
-    if (!productId || qty <= 0) continue;
-
-    const { data: product } = await supabase
-      .from("products")
-      .select("stock")
-      .eq("id", productId)
-      .gte("stock", qty)
-      .maybeSingle();
-
-    if (!product) continue;
-    const currentStock = Number(product.stock);
-    const nextStock = currentStock - qty;
-    const { data: updated } = await supabase
-      .from("products")
-      .update({ stock: nextStock })
-      .eq("id", productId)
-      .eq("stock", currentStock)
-      .select("id")
-      .maybeSingle();
-
-    if (!updated) {
-      console.warn(`[orderFulfillment] stock race for product ${productId}, order ${orderId}`);
-    }
-  }
+  const { data, error } = await supabase.rpc("decrement_paid_store_order_stock", {
+    p_order_id: orderId,
+  });
+  if (error) throw new Error(`Order stock decrement failed: ${error.message}`);
+  const result = data as { ok?: boolean; error?: string } | null;
+  if (!result?.ok) throw new Error(result?.error ?? "Order stock decrement failed");
 }
 
 /** Restore product stock when an order refund is approved. */
@@ -58,26 +32,12 @@ export async function restoreOrderStock(
   supabase: SupabaseClient,
   orderId: string
 ): Promise<void> {
-  const { data: items } = await supabase
-    .from("order_items")
-    .select("product_id, quantity")
-    .eq("order_id", orderId);
-
-  for (const item of items ?? []) {
-    const productId = (item as { product_id: string }).product_id;
-    const qty = Number((item as { quantity: number }).quantity) || 0;
-    if (!productId || qty <= 0) continue;
-
-    const { data: product } = await supabase
-      .from("products")
-      .select("stock")
-      .eq("id", productId)
-      .maybeSingle();
-
-    if (!product) continue;
-    const nextStock = Number(product.stock) + qty;
-    await supabase.from("products").update({ stock: nextStock }).eq("id", productId);
-  }
+  const { data, error } = await supabase.rpc("restore_store_order_stock", {
+    p_order_id: orderId,
+  });
+  if (error) throw new Error(`Order stock restoration failed: ${error.message}`);
+  const result = data as { ok?: boolean; error?: string } | null;
+  if (!result?.ok) throw new Error(result?.error ?? "Order stock restoration failed");
 }
 
 async function adjustPromoUsage(
@@ -117,36 +77,19 @@ async function incrementPromoUsage(
   supabase: SupabaseClient,
   order: StoreOrderRow
 ): Promise<void> {
-  const promoId = order.seller_promo_id;
-  if (promoId) {
-    const { data: promoRow } = await supabase
-      .from("seller_promos")
-      .select("usage_count")
-      .eq("id", promoId)
-      .maybeSingle();
-    const current = promoRow?.usage_count;
-    if (typeof current === "number") {
-      await supabase
-        .from("seller_promos")
-        .update({ usage_count: current + 1 })
-        .eq("id", promoId);
-    }
-  }
+  const promos: Array<{ id: string; type: "seller" | "platform" }> = [];
+  if (order.seller_promo_id) promos.push({ id: order.seller_promo_id, type: "seller" });
+  if (order.platform_promo_id) promos.push({ id: order.platform_promo_id, type: "platform" });
 
-  const platId = order.platform_promo_id;
-  if (platId) {
-    const { data: platRow } = await supabase
-      .from("platform_promo_codes")
-      .select("usage_count")
-      .eq("id", platId)
-      .maybeSingle();
-    const pcur = platRow?.usage_count;
-    if (typeof pcur === "number") {
-      await supabase
-        .from("platform_promo_codes")
-        .update({ usage_count: pcur + 1 })
-        .eq("id", platId);
-    }
+  for (const promo of promos) {
+    const { data, error } = await supabase.rpc("apply_store_order_promo_usage", {
+      p_order_id: order.id,
+      p_promo_id: promo.id,
+      p_promo_type: promo.type,
+    });
+    if (error) throw new Error(`Promo usage update failed: ${error.message}`);
+    const result = data as { ok?: boolean; error?: string } | null;
+    if (!result?.ok) throw new Error(result?.error ?? "Promo usage update failed");
   }
 }
 
