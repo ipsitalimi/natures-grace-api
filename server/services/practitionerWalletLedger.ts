@@ -118,7 +118,7 @@ export async function creditBookingEarning(
 
   const net = netEarning(Number(booking.amount), commissionRate);
 
-  await supabase.from("practitioner_wallet_transactions").insert({
+  const { error: earningInsertError } = await supabase.from("practitioner_wallet_transactions").insert({
     wallet_id: wallet.id,
     booking_id: booking.id,
     type: "credit",
@@ -127,6 +127,13 @@ export async function creditBookingEarning(
     description: `Session ${booking.booking_number} — ${booking.service_name}`,
     is_released: false,
   });
+
+  // The unique booking_earning index makes this insert the idempotency gate.
+  // Do not update balances when the ledger row was not inserted.
+  if (earningInsertError) {
+    if (earningInsertError.code === "23505") return;
+    throw new Error(`Could not record practitioner earning: ${earningInsertError.message}`);
+  }
 
   await updateWallet(supabase, wallet.id, {
     total_earned: Number(wallet.total_earned) + net,
