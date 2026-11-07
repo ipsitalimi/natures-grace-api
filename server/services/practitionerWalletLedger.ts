@@ -146,134 +146,36 @@ export async function creditBookingEarning(
 }
 
 export async function releaseBookingEarning(
-  supabase: SupabaseClient,
-  booking: BookingRow,
-  commissionRate: number
+  supabase: SupabaseClient, booking: BookingRow, commissionRate: number
 ): Promise<void> {
-  if (
-    booking.payment_status !== "Paid" ||
-    booking.booking_status !== "Completed" ||
-    !booking.practitioner_id
-  ) {
-    return;
-  }
-
-  const wallet = await getOrCreatePractitionerWallet(
-    supabase,
-    booking.practitioner_id,
-    commissionRate
-  );
+  if (booking.payment_status !== "Paid" || booking.booking_status !== "Completed" || !booking.practitioner_id) return;
+  const wallet = await getOrCreatePractitionerWallet(supabase, booking.practitioner_id, commissionRate);
   if (!wallet) return;
-
-  if (await hasTxn(supabase, wallet.id, booking.id, "earning_release")) return;
-
-  const { data: earning } = await supabase
-    .from("practitioner_wallet_transactions")
-    .select("*")
-    .eq("wallet_id", wallet.id)
-    .eq("booking_id", booking.id)
-    .eq("category", "booking_earning")
-    .maybeSingle();
-
-  if (!earning) {
-    await creditBookingEarning(supabase, booking, commissionRate);
-    return;
-  }
-
-  const row = earning as WalletTxnRow;
-  if (row.is_released) return;
-
-  const net = Number(row.amount);
-
-  await supabase
-    .from("practitioner_wallet_transactions")
-    .update({ is_released: true })
-    .eq("id", row.id);
-
-  await supabase.from("practitioner_wallet_transactions").insert({
-    wallet_id: wallet.id,
-    booking_id: booking.id,
-    type: "credit",
-    category: "earning_release",
-    amount: net,
-    description: `Released — ${booking.booking_number}`,
-    is_released: true,
+  const { data: earning } = await supabase.from("practitioner_wallet_transactions").select("id")
+    .eq("wallet_id", wallet.id).eq("booking_id", booking.id).eq("category", "booking_earning").maybeSingle();
+  if (!earning) await creditBookingEarning(supabase, booking, commissionRate);
+  const { data, error } = await supabase.rpc("release_wallet_earning", {
+    p_wallet_type: "practitioner", p_wallet_id: wallet.id, p_order_or_booking_id: booking.id,
+    p_description: `Released — ${booking.booking_number}`,
   });
-
-  const { data: fresh } = await supabase
-    .from("practitioner_wallets")
-    .select("*")
-    .eq("id", wallet.id)
-    .single();
-
-  if (!fresh) return;
-
-  const w = fresh as WalletRow;
-  await updateWallet(supabase, w.id, {
-    held_balance: Math.max(0, Number(w.held_balance) - net),
-    available_balance: Number(w.available_balance) + net,
-  });
+  if (error) throw new Error(`Practitioner earning release failed: ${error.message}`);
+  const result = data as { ok?: boolean; error?: string } | null;
+  if (!result?.ok) throw new Error(result?.error ?? "Practitioner earning release failed");
 }
 
 export async function reverseBookingEarning(
-  supabase: SupabaseClient,
-  booking: BookingRow,
-  commissionRate: number
+  supabase: SupabaseClient, booking: BookingRow, commissionRate: number
 ): Promise<void> {
   if (!booking.practitioner_id) return;
-
-  const wallet = await getOrCreatePractitionerWallet(
-    supabase,
-    booking.practitioner_id,
-    commissionRate
-  );
+  const wallet = await getOrCreatePractitionerWallet(supabase, booking.practitioner_id, commissionRate);
   if (!wallet) return;
-
-  const { data: earning } = await supabase
-    .from("practitioner_wallet_transactions")
-    .select("*")
-    .eq("wallet_id", wallet.id)
-    .eq("booking_id", booking.id)
-    .eq("category", "booking_earning")
-    .maybeSingle();
-
-  if (!earning) return;
-
-  const row = earning as WalletTxnRow;
-  const net = Number(row.amount);
-
-  if (await hasTxn(supabase, wallet.id, booking.id, "refund")) return;
-
-  await supabase.from("practitioner_wallet_transactions").insert({
-    wallet_id: wallet.id,
-    booking_id: booking.id,
-    type: "debit",
-    category: "refund",
-    amount: net,
-    description: `Reversal — ${booking.booking_number}`,
-    is_released: true,
+  const { data, error } = await supabase.rpc("reverse_wallet_earning", {
+    p_wallet_type: "practitioner", p_wallet_id: wallet.id, p_order_or_booking_id: booking.id,
+    p_description: `Reversal — ${booking.booking_number}`,
   });
-
-  const { data: fresh } = await supabase
-    .from("practitioner_wallets")
-    .select("*")
-    .eq("id", wallet.id)
-    .single();
-
-  if (!fresh) return;
-
-  const w = fresh as WalletRow;
-  const patch: Partial<WalletRow> = {
-    total_earned: Math.max(0, Number(w.total_earned) - net),
-  };
-
-  if (row.is_released) {
-    patch.available_balance = Math.max(0, Number(w.available_balance) - net);
-  } else {
-    patch.held_balance = Math.max(0, Number(w.held_balance) - net);
-  }
-
-  await updateWallet(supabase, w.id, patch);
+  if (error) throw new Error(`Practitioner earning reversal failed: ${error.message}`);
+  const result = data as { ok?: boolean; error?: string } | null;
+  if (!result?.ok) throw new Error(result?.error ?? "Practitioner earning reversal failed");
 }
 
 /**
