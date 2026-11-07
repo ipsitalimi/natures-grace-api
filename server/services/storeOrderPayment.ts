@@ -93,7 +93,7 @@ export async function confirmStoreOrderPayment(params: {
 
   const { data: existing, error: fetchError } = await supabase
     .from("orders")
-    .select("id, user_id, payment_status, order_number")
+    .select("id, user_id, payment_status, order_number, razorpay_order_id, total")
     .eq("id", params.storeOrderId)
     .maybeSingle();
 
@@ -105,11 +105,21 @@ export async function confirmStoreOrderPayment(params: {
     return { ok: false, error: "Order does not belong to this account" };
   }
 
+  if (existing.razorpay_order_id !== params.razorpayOrderId) {
+    return { ok: false, error: "Payment does not belong to this store order" };
+  }
+
+  const expectedAmountPaise = Math.round(Number(existing.total) * 100);
+  if (!Number.isFinite(expectedAmountPaise) || expectedAmountPaise < 100) {
+    return { ok: false, error: "Store order total is invalid" };
+  }
+
   const verified = await confirmBookingPayment({
     orderId: params.razorpayOrderId,
     paymentId: params.paymentId,
     signature: params.signature,
     devMode: params.devMode,
+    expectedAmountPaise,
   });
 
   if (!verified.ok) {
