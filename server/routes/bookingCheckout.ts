@@ -73,20 +73,10 @@ async function validateBookingAmount(
 /** POST /api/bookings/checkout/create-order */
 async function handleCreateOrder(req: Request, res: Response) {
   try {
-    console.log("[bookingCheckout][server] create-order reached backend", {
-      method: req.method,
-      path: req.path,
-      authorizationHeaderPresent: Boolean(req.header("authorization")),
-    });
     const user = await requireBearerUser(req, res);
     if (!user) {
-      console.warn("[bookingCheckout][server] create-order stopped at auth middleware");
       return;
     }
-    console.log("[bookingCheckout][server] create-order auth passed", {
-      userId: user.id,
-      emailPresent: Boolean(user.email),
-    });
 
     const body = req.body as {
       practitionerId?: string;
@@ -153,10 +143,7 @@ async function handleCreateOrder(req: Request, res: Response) {
       keyId,
     });
   } catch (err) {
-    console.error("[bookingCheckout][server] create-order threw:", err);
-    if (err instanceof Error) {
-      console.error("[bookingCheckout][server] create-order stack:", err.stack);
-    }
+    console.error("[bookingCheckout][server] create-order failed");
     const message = err instanceof Error ? err.message : "Create order failed";
     return res.status(500).json({ error: message });
   }
@@ -165,20 +152,10 @@ async function handleCreateOrder(req: Request, res: Response) {
 /** POST /api/bookings/checkout/confirm */
 async function handleConfirmPayment(req: Request, res: Response) {
   try {
-    console.log("[bookingCheckout][server] confirm reached backend", {
-      method: req.method,
-      path: req.path,
-      authorizationHeaderPresent: Boolean(req.header("authorization")),
-    });
     const user = await requireBearerUser(req, res);
     if (!user) {
-      console.warn("[bookingCheckout][server] confirm stopped at auth middleware");
       return;
     }
-    console.log("[bookingCheckout][server] confirm auth passed", {
-      userId: user.id,
-      emailPresent: Boolean(user.email),
-    });
 
     const { orderId, paymentId, signature, devMode } = req.body as {
       orderId?: string;
@@ -244,10 +221,7 @@ async function handleConfirmPayment(req: Request, res: Response) {
       bookingNumber: created.bookingNumber,
     });
   } catch (err) {
-    console.error("[bookingCheckout][server] confirm threw:", err);
-    if (err instanceof Error) {
-      console.error("[bookingCheckout][server] confirm stack:", err.stack);
-    }
+    console.error("[bookingCheckout][server] confirm failed");
     const message = err instanceof Error ? err.message : "Confirm failed";
     return res.status(500).json({ error: message });
   }
