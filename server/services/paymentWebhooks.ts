@@ -64,11 +64,17 @@ export async function handlePaymentCaptured(payload: {
   if (storeOrderId) {
     const { data: order } = await supabase
       .from("orders")
-      .select("user_id")
+      .select("user_id, total, razorpay_order_id, payment_status")
       .eq("id", storeOrderId)
       .maybeSingle();
 
-    if (order?.user_id) {
+    if (
+      order?.user_id &&
+      order.razorpay_order_id === razorpayOrderId &&
+      order.payment_status === "Pending" &&
+      entity.currency === "INR" &&
+      Number(entity.amount) === Math.round(Number(order.total) * 100)
+    ) {
       const result = await fulfillStoreOrderPayment({
         supabase,
         storeOrderId,
@@ -87,7 +93,19 @@ export async function handlePaymentCaptured(payload: {
     .eq("razorpay_order_id", razorpayOrderId)
     .maybeSingle();
 
-  if (pending?.user_id) {
+  const bookingDraft = pending?.booking_draft as {
+    feeBreakdown?: { totalInr?: number };
+    amountInr?: number;
+  } | null;
+
+  const expectedBookingTotal = bookingDraft?.feeBreakdown?.totalInr ?? bookingDraft?.amountInr;
+
+  if (
+    pending?.user_id &&
+    entity.currency === "INR" &&
+    Number.isFinite(Number(expectedBookingTotal)) &&
+    Number(entity.amount) === Math.round(Number(expectedBookingTotal) * 100)
+  ) {
     const result = await fulfillBookingPayment({
       supabase,
       userId: pending.user_id as string,
