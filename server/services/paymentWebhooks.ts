@@ -71,7 +71,7 @@ export async function handlePaymentCaptured(payload: {
     if (
       order?.user_id &&
       order.razorpay_order_id === razorpayOrderId &&
-      order.payment_status === "Pending" &&
+      (order.payment_status === "Pending" || order.payment_status === "Paid") &&
       entity.currency === "INR" &&
       Number(entity.amount) === Math.round(Number(order.total) * 100)
     ) {
