@@ -31,7 +31,7 @@ export async function savePendingBookingCheckout(
   razorpayOrderId: string,
   booking: BookingDraft
 ): Promise<void> {
-  await supabase.from("pending_booking_checkouts").upsert(
+  const { error } = await supabase.from("pending_booking_checkouts").upsert(
     {
       user_id: userId,
       razorpay_order_id: razorpayOrderId,
@@ -41,6 +41,10 @@ export async function savePendingBookingCheckout(
     },
     { onConflict: "razorpay_order_id" }
   );
+
+  if (error) {
+    throw new Error(`Could not save booking checkout draft: ${error.message}`);
+  }
 }
 
 /** Idempotent booking fulfillment from Razorpay payment. */
