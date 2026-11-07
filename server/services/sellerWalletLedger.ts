@@ -117,121 +117,36 @@ export async function creditOrderEarning(
 }
 
 export async function releaseOrderEarning(
-  supabase: SupabaseClient,
-  order: OrderRow,
-  commissionRate: number
+  supabase: SupabaseClient, order: OrderRow, commissionRate: number
 ): Promise<void> {
-  if (order.payment_status !== "Paid" || order.status !== "Delivered" || !order.seller_id) {
-    return;
-  }
-
+  if (order.payment_status !== "Paid" || order.status !== "Delivered" || !order.seller_id) return;
   const wallet = await getOrCreateSellerWallet(supabase, order.seller_id, commissionRate);
   if (!wallet) return;
-
-  if (await hasTransaction(supabase, wallet.id, order.id, "earning_release")) return;
-
-  const { data: earning } = await supabase
-    .from("wallet_transactions")
-    .select("*")
-    .eq("wallet_id", wallet.id)
-    .eq("order_id", order.id)
-    .eq("category", "order_earning")
-    .maybeSingle();
-
-  if (!earning) {
-    await creditOrderEarning(supabase, order, commissionRate);
-    return;
-  }
-
-  const row = earning as WalletTxnRow;
-  if (row.is_released) return;
-
-  const net = Number(row.amount);
-
-  await supabase.from("wallet_transactions").update({ is_released: true }).eq("id", row.id);
-
-  if (!(await hasTransaction(supabase, wallet.id, order.id, "earning_release"))) {
-    await supabase.from("wallet_transactions").insert({
-      wallet_id: wallet.id,
-      order_id: order.id,
-      type: "credit",
-      category: "earning_release",
-      amount: net,
-      description: `Released — ${order.order_number}`,
-      is_released: true,
-    });
-  }
-
-  const { data: fresh } = await supabase
-    .from("seller_wallets")
-    .select("*")
-    .eq("id", wallet.id)
-    .single();
-
-  if (!fresh) return;
-
-  const w = fresh as WalletRow;
-  await updateWalletBalances(supabase, w.id, {
-    held_balance: Math.max(0, Number(w.held_balance) - net),
-    available_balance: Number(w.available_balance) + net,
+  const { data: earning } = await supabase.from("wallet_transactions").select("id")
+    .eq("wallet_id", wallet.id).eq("order_id", order.id).eq("category", "order_earning").maybeSingle();
+  if (!earning) await creditOrderEarning(supabase, order, commissionRate);
+  const { data, error } = await supabase.rpc("release_wallet_earning", {
+    p_wallet_type: "seller", p_wallet_id: wallet.id, p_order_or_booking_id: order.id,
+    p_description: `Released — ${order.order_number}`,
   });
+  if (error) throw new Error(`Seller earning release failed: ${error.message}`);
+  const result = data as { ok?: boolean; error?: string } | null;
+  if (!result?.ok) throw new Error(result?.error ?? "Seller earning release failed");
 }
 
 export async function reverseOrderEarning(
-  supabase: SupabaseClient,
-  order: OrderRow,
-  commissionRate: number
+  supabase: SupabaseClient, order: OrderRow, commissionRate: number
 ): Promise<void> {
   if (!order.seller_id) return;
-
   const wallet = await getOrCreateSellerWallet(supabase, order.seller_id, commissionRate);
   if (!wallet) return;
-
-  const { data: earning } = await supabase
-    .from("wallet_transactions")
-    .select("*")
-    .eq("wallet_id", wallet.id)
-    .eq("order_id", order.id)
-    .eq("category", "order_earning")
-    .maybeSingle();
-
-  if (!earning) return;
-
-  const row = earning as WalletTxnRow;
-  const net = Number(row.amount);
-
-  if (await hasTransaction(supabase, wallet.id, order.id, "refund")) return;
-
-  await supabase.from("wallet_transactions").insert({
-    wallet_id: wallet.id,
-    order_id: order.id,
-    type: "debit",
-    category: "refund",
-    amount: net,
-    description: `Reversal — ${order.order_number}`,
-    is_released: true,
+  const { data, error } = await supabase.rpc("reverse_wallet_earning", {
+    p_wallet_type: "seller", p_wallet_id: wallet.id, p_order_or_booking_id: order.id,
+    p_description: `Reversal — ${order.order_number}`,
   });
-
-  const { data: fresh } = await supabase
-    .from("seller_wallets")
-    .select("*")
-    .eq("id", wallet.id)
-    .single();
-
-  if (!fresh) return;
-
-  const w = fresh as WalletRow;
-  const patch: Partial<WalletRow> = {
-    total_earned: Math.max(0, Number(w.total_earned) - net),
-  };
-
-  if (row.is_released) {
-    patch.available_balance = Math.max(0, Number(w.available_balance) - net);
-  } else {
-    patch.held_balance = Math.max(0, Number(w.held_balance) - net);
-  }
-
-  await updateWalletBalances(supabase, w.id, patch);
+  if (error) throw new Error(`Seller earning reversal failed: ${error.message}`);
+  const result = data as { ok?: boolean; error?: string } | null;
+  if (!result?.ok) throw new Error(result?.error ?? "Seller earning reversal failed");
 }
 
 export async function syncSellerWalletFromOrders(
