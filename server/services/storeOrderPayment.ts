@@ -59,11 +59,20 @@ export async function createStoreRazorpayOrder(params: {
     return { ok: false, error: result.error };
   }
 
-  await supabase
+  const { data: linkedOrder, error: linkError } = await supabase
     .from("orders")
     .update({ razorpay_order_id: result.orderId })
     .eq("id", params.storeOrderId)
-    .eq("payment_status", "Pending");
+    .eq("payment_status", "Pending")
+    .select("id")
+    .maybeSingle();
+
+  if (linkError || !linkedOrder) {
+    return {
+      ok: false,
+      error: linkError?.message ?? "Could not link payment order to store order",
+    };
+  }
 
   const keyId = process.env.RAZORPAY_KEY_ID?.trim() ?? null;
 
