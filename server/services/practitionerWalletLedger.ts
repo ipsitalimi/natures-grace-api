@@ -379,80 +379,30 @@ export async function requestPractitionerPayout(
   amount: number,
   commissionRate: number
 ): Promise<{ payoutId?: string; error?: string }> {
-  const wallet = await getOrCreatePractitionerWallet(
-    supabase,
-    practitionerId,
-    commissionRate
-  );
+  const wallet = await getOrCreatePractitionerWallet(supabase, practitionerId, commissionRate);
   if (!wallet) return { error: "Wallet not found" };
 
-  const { data: walletRow } = await supabase
+  const { data: walletRow, error: walletError } = await supabase
     .from("practitioner_wallets")
     .select("bank_account_label")
     .eq("id", wallet.id)
     .maybeSingle();
-
+  if (walletError) return { error: walletError.message };
   if (!isBankAccountLinkedForPayout((walletRow as { bank_account_label?: string | null } | null)?.bank_account_label)) {
     return { error: "Bank account details required before requesting a withdrawal" };
   }
+  if (!Number.isFinite(amount) || amount <= 0) return { error: "Invalid amount" };
 
-  if (amount <= 0) return { error: "Invalid amount" };
-
-  const { data: reservedWallet, error: reserveError } = await supabase
-    .from("practitioner_wallets")
-    .update({
-      available_balance: Number(wallet.available_balance) - amount,
-      pending_payout: Number(wallet.pending_payout) + amount,
-    })
-    .eq("id", wallet.id)
-    .gte("available_balance", amount)
-    .select()
-    .maybeSingle();
-
-  if (reserveError) return { error: reserveError.message };
-  if (!reservedWallet) return { error: "Insufficient available balance" };
-
-  const { data: payout, error: payoutError } = await supabase
-    .from("practitioner_payouts")
-    .insert({
-      wallet_id: wallet.id,
-      amount,
-      status: "Pending",
-      notes: "Manual withdrawal — processed by Nature's Grace team within 3–7 business days",
-    })
-    .select()
-    .single();
-
-  if (payoutError || !payout) {
-    await updateWallet(supabase, wallet.id, {
-      available_balance: Number(reservedWallet.available_balance) + amount,
-      pending_payout: Math.max(0, Number(reservedWallet.pending_payout) - amount),
-    });
-    return { error: payoutError?.message ?? "Could not create payout" };
-  }
-
-  const { error: txnError } = await supabase
-    .from("practitioner_wallet_transactions")
-    .insert({
-      wallet_id: wallet.id,
-      payout_id: payout.id,
-      type: "debit",
-      category: "payout",
-      amount,
-      description: "Payout to Bank Account (pending)",
-      is_released: true,
-    });
-
-  if (txnError) {
-    await supabase.from("practitioner_payouts").delete().eq("id", payout.id);
-    await updateWallet(supabase, wallet.id, {
-      available_balance: Number(reservedWallet.available_balance) + amount,
-      pending_payout: Math.max(0, Number(reservedWallet.pending_payout) - amount),
-    });
-    return { error: txnError.message };
-  }
-
-  return { payoutId: payout.id as string };
+  const { data, error } = await supabase.rpc("request_wallet_payout", {
+    p_payout_type: "practitioner",
+    p_wallet_id: wallet.id,
+    p_amount: Math.round(amount * 100) / 100,
+    p_notes: "Manual withdrawal — processed by Nature's Grace team within 3–7 business days",
+  });
+  if (error) return { error: error.message };
+  const result = data as { ok?: boolean; error?: string; payout_id?: string } | null;
+  if (!result?.ok || !result.payout_id) return { error: result?.error ?? "Could not create payout" };
+  return { payoutId: result.payout_id };
 }
 
 export async function verifyPractitionerPayoutOwnership(
