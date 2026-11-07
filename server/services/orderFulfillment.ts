@@ -197,6 +197,7 @@ export async function fulfillStoreOrderPayment(params: {
       return { ok: false, error: "Order is not awaiting payment" };
     }
   }
+  }
 
   const orderAfterPay = (updated ?? order) as StoreOrderRow;
 
