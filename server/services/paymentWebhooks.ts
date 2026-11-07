@@ -46,6 +46,8 @@ export async function handlePaymentCaptured(payload: {
     entity?: {
       id?: string;
       order_id?: string;
+      amount?: number;
+      currency?: string;
       notes?: Record<string, string>;
     };
   };
