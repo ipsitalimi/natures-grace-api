@@ -6,7 +6,8 @@ export type PayoutStatus =
   | "Processing"
   | "Completed"
   | "Failed"
-  | "Cancelled";
+  | "Cancelled"
+  | "Rejected";
 
 export type DbPayoutRow = {
   id: string;
@@ -30,7 +31,7 @@ export type DbWalletRow = {
   total_earned: number;
 };
 
-const TERMINAL: PayoutStatus[] = ["Completed", "Failed", "Cancelled"];
+const TERMINAL: PayoutStatus[] = ["Completed", "Failed", "Cancelled", "Rejected"];
 
 export async function getPayoutById(
   supabase: SupabaseClient,
