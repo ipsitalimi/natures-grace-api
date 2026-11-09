@@ -103,6 +103,37 @@ export async function reconcilePendingPayout(
   await updateWalletBalances(supabase, walletId, { pending_payout: pendingSum });
 }
 
+async function transitionPayout(
+  supabase: SupabaseClient,
+  payoutId: string,
+  action: "processing" | "completed" | "failed",
+  opts: {
+    razorpayPayoutId?: string;
+    razorpayFundAccountId?: string;
+    notes?: string;
+    failureReason?: string;
+    webhookEvent?: string;
+  } = {}
+): Promise<DbPayoutRow> {
+  const { data, error } = await supabase.rpc("transition_wallet_payout", {
+    p_payout_type: "seller",
+    p_payout_id: payoutId,
+    p_action: action,
+    p_razorpay_payout_id: opts.razorpayPayoutId ?? null,
+    p_razorpay_fund_account_id: opts.razorpayFundAccountId ?? null,
+    p_notes: opts.notes ?? null,
+    p_failure_reason: opts.failureReason ?? null,
+    p_webhook_event: opts.webhookEvent ?? null,
+  });
+
+  if (error) throw new Error(error.message);
+  const result = data as { ok?: boolean; error?: string; payout?: DbPayoutRow } | null;
+  if (!result?.ok || !result.payout) {
+    throw new Error(result?.error ?? "Payout lifecycle transition failed");
+  }
+  return result.payout;
+}
+
 export async function markPayoutProcessing(
   supabase: SupabaseClient,
   payoutId: string,
@@ -113,27 +144,10 @@ export async function markPayoutProcessing(
     webhookEvent?: string;
   }
 ): Promise<DbPayoutRow> {
-  const payout = await getPayoutById(supabase, payoutId);
-  if (!payout) throw new Error("Payout not found");
-  if (TERMINAL.includes(payout.status)) return payout;
-
-  const { data, error } = await supabase
-    .from("seller_payouts")
-    .update({
-      status: "Processing",
-      razorpay_payout_id: opts.razorpayPayoutId ?? payout.razorpay_payout_id,
-      razorpay_fund_account_id:
-        opts.razorpayFundAccountId ?? payout.razorpay_fund_account_id,
-      notes: opts.notes ?? payout.notes,
-      last_webhook_event: opts.webhookEvent ?? null,
-    })
-    .eq("id", payoutId)
-    .select()
-    .single();
-
-  if (error) throw new Error(error.message);
-  await reconcilePendingPayout(supabase, payout.wallet_id);
-  return data as DbPayoutRow;
+  const existing = await getPayoutById(supabase, payoutId);
+  if (!existing) throw new Error("Payout not found");
+  if (TERMINAL.includes(existing.status)) return existing;
+  return transitionPayout(supabase, payoutId, "processing", opts);
 }
 
 export async function completePayout(
@@ -146,43 +160,7 @@ export async function completePayout(
     notes?: string;
   } = {}
 ): Promise<DbPayoutRow> {
-  const payout = await getPayoutById(supabase, payoutId);
-  if (!payout) throw new Error("Payout not found");
-  if (payout.status === "Completed") return payout;
-
-  const amount = Number(payout.amount);
-  const wallet = await getWallet(supabase, payout.wallet_id);
-
-  const { data, error } = await supabase
-    .from("seller_payouts")
-    .update({
-      status: "Completed",
-      razorpay_payout_id: opts.razorpayPayoutId ?? payout.razorpay_payout_id,
-      razorpay_fund_account_id:
-        opts.razorpayFundAccountId ?? payout.razorpay_fund_account_id,
-      completed_at: new Date().toISOString(),
-      last_webhook_event: opts.webhookEvent ?? null,
-      failure_reason: null,
-      notes: opts.notes ?? payout.notes,
-    })
-    .eq("id", payoutId)
-    .select()
-    .single();
-
-  if (error) throw new Error(error.message);
-
-  await updateWalletBalances(supabase, payout.wallet_id, {
-    pending_payout: Math.max(0, Number(wallet.pending_payout) - amount),
-  });
-
-  await updatePayoutTxnDescription(
-    supabase,
-    payoutId,
-    "Payout to Bank Account (completed)"
-  );
-
-  await reconcilePendingPayout(supabase, payout.wallet_id);
-  return data as DbPayoutRow;
+  return transitionPayout(supabase, payoutId, "completed", opts);
 }
 
 export async function failPayout(
@@ -194,71 +172,5 @@ export async function failPayout(
     webhookEvent?: string;
   } = {}
 ): Promise<DbPayoutRow> {
-  const payout = await getPayoutById(supabase, payoutId);
-  if (!payout) throw new Error("Payout not found");
-  if (payout.status === "Failed") return payout;
-  if (payout.status === "Completed") {
-    throw new Error("Cannot fail a completed payout");
-  }
-
-  const amount = Number(payout.amount);
-  const wallet = await getWallet(supabase, payout.wallet_id);
-
-  const { data, error } = await supabase
-    .from("seller_payouts")
-    .update({
-      status: "Failed",
-      failure_reason: opts.failureReason ?? "Payout failed",
-      razorpay_payout_id: opts.razorpayPayoutId ?? payout.razorpay_payout_id,
-      last_webhook_event: opts.webhookEvent ?? null,
-    })
-    .eq("id", payoutId)
-    .select()
-    .single();
-
-  if (error) throw new Error(error.message);
-
-  const wasReserved =
-    payout.status === "Pending" ||
-    payout.status === "Processing" ||
-    payout.status === "Under Review";
-
-  if (wasReserved) {
-    await updateWalletBalances(supabase, payout.wallet_id, {
-      pending_payout: Math.max(0, Number(wallet.pending_payout) - amount),
-      available_balance: Number(wallet.available_balance) + amount,
-    });
-
-    const { data: existingRefund } = await supabase
-      .from("wallet_transactions")
-      .select("id")
-      .eq("payout_id", payoutId)
-      .eq("category", "adjustment")
-      .eq("type", "credit")
-      .maybeSingle();
-
-    if (!existingRefund) {
-      const { error: refundLedgerError } = await supabase.from("wallet_transactions").insert({
-        wallet_id: payout.wallet_id,
-        payout_id: payoutId,
-        type: "credit",
-        category: "adjustment",
-        amount,
-        description: `Payout failed — ${opts.failureReason ?? "refunded to wallet"}`,
-        is_released: true,
-      });
-      if (refundLedgerError && refundLedgerError.code !== "23505") {
-        throw new Error(`Could not record failed payout refund: ${refundLedgerError.message}`);
-      }
-    }
-  }
-
-  await updatePayoutTxnDescription(
-    supabase,
-    payoutId,
-    `Payout failed — ${opts.failureReason ?? "not processed"}`
-  );
-
-  await reconcilePendingPayout(supabase, payout.wallet_id);
-  return data as DbPayoutRow;
+  return transitionPayout(supabase, payoutId, "failed", opts);
 }
