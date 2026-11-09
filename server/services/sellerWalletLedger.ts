@@ -21,12 +21,6 @@ type WalletRow = {
   bank_account_label?: string | null;
 };
 
-type WalletTxnRow = {
-  id: string;
-  amount: number;
-  is_released: boolean;
-};
-
 async function getOrCreateSellerWallet(
   supabase: SupabaseClient,
   sellerId: string,
