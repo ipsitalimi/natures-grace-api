@@ -55,9 +55,10 @@
 - [ ] Seller/practitioner payout request reserves available funds, increases pending payout, creates payout record and debit ledger row atomically.
 - [ ] Concurrent payout requests cannot overdraw the wallet.
 - [ ] Invalid amount, missing wallet, or insufficient funds leaves wallet and ledger unchanged.
-- [ ] Admin moves payout Pending → Under Review → Processing → Completed; only status/audit data changes on each transition.
+- [ ] Admin moves payout Pending → Under Review → Processing; available and pending balances remain unchanged.
+- [ ] Mark payout Completed: pending payout decreases by exactly the payout amount; available balance does not increase.
 - [ ] Reject payout: available funds are restored, pending payout decreases, reversal ledger row is created exactly once.
-- [ ] Repeated rejection/status update cannot restore funds twice.
+- [ ] Repeated completion/rejection/status update cannot adjust balances twice.
 - [ ] Completed/Rejected/Failed/Cancelled terminal payout cannot be transitioned again.
 - [ ] Notification failure after successful status change does not roll back payout state; retry does not duplicate wallet changes.
 
