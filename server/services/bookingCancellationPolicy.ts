@@ -62,9 +62,17 @@ export function getBookingSessionStart(sessionDate: string, sessionTime: string)
   // Booking dates are stored as YYYY-MM-DD and times commonly as 2:30 PM.
   const match = time.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/i);
   if (/^\d{4}-\d{2}-\d{2}$/.test(date) && match) {
-    let hours = Number(match[1]) % 12;
-    if (match[3].toUpperCase() === "PM") hours += 12;
+    const year = Number(date.slice(0, 4));
+    const month = Number(date.slice(5, 7));
+    const day = Number(date.slice(8, 10));
+    const monthDays = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const hour12 = Number(match[1]);
     const minutes = Number(match[2] ?? "0");
+    if (month < 1 || month > 12 || day < 1 || day > monthDays ||
+        hour12 < 1 || hour12 > 12 || minutes < 0 || minutes > 59) return null;
+
+    let hours = hour12 % 12;
+    if (match[3].toUpperCase() === "PM") hours += 12;
     const parsed = new Date(`${date}T${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:00+05:30`);
     return Number.isNaN(parsed.getTime()) ? null : parsed;
   }
