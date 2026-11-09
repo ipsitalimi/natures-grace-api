@@ -74,11 +74,12 @@ async function updatePayoutTxnDescription(
   payoutId: string,
   description: string
 ): Promise<void> {
-  await supabase
+  const { error } = await supabase
     .from("practitioner_wallet_transactions")
     .update({ description })
     .eq("payout_id", payoutId)
     .eq("category", "payout");
+  if (error) throw new Error(`Could not update payout ledger description: ${error.message}`);
 }
 
 /** Sum Pending + Processing payouts and align wallet.pending_payout. */
@@ -237,7 +238,7 @@ export async function failPayout(
       .maybeSingle();
 
     if (!existingRefund) {
-      await supabase.from("practitioner_wallet_transactions").insert({
+      const { error: refundLedgerError } = await supabase.from("practitioner_wallet_transactions").insert({
         wallet_id: payout.wallet_id,
         payout_id: payoutId,
         type: "credit",
@@ -246,6 +247,9 @@ export async function failPayout(
         description: `Payout failed — ${opts.failureReason ?? "refunded to wallet"}`,
         is_released: true,
       });
+      if (refundLedgerError && refundLedgerError.code !== "23505") {
+        throw new Error(`Could not record failed payout refund: ${refundLedgerError.message}`);
+      }
     }
   }
 
