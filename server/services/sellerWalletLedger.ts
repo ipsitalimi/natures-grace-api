@@ -27,10 +27,6 @@ type WalletTxnRow = {
   is_released: boolean;
 };
 
-function netEarning(gross: number, commissionRate: number): number {
-  return Math.round(gross * (1 - commissionRate / 100) * 100) / 100;
-}
-
 async function getOrCreateSellerWallet(
   supabase: SupabaseClient,
   sellerId: string,
@@ -65,34 +61,6 @@ async function updateWalletBalances(
   patch: Partial<Pick<WalletRow, "available_balance" | "pending_payout" | "held_balance" | "total_earned">>
 ): Promise<void> {
   await supabase.from("seller_wallets").update(patch).eq("id", walletId);
-}
-
-async function hasTransaction(
-  supabase: SupabaseClient,
-  walletId: string,
-  orderId: string,
-  category: string
-): Promise<boolean> {
-  const { data } = await supabase
-    .from("wallet_transactions")
-    .select("id")
-    .eq("wallet_id", walletId)
-    .eq("order_id", orderId)
-    .eq("category", category)
-    .maybeSingle();
-  return Boolean(data);
-}
-
-async function loadOrderItemsLabel(
-  supabase: SupabaseClient,
-  orderId: string
-): Promise<string> {
-  const { data: items } = await supabase
-    .from("order_items")
-    .select("product_name")
-    .eq("order_id", orderId)
-    .limit(1);
-  return (items?.[0] as { product_name?: string } | undefined)?.product_name ?? "Order items";
 }
 
 export async function creditOrderEarning(
