@@ -102,51 +102,73 @@ export async function creditOrderEarning(
 ): Promise<void> {
   if (order.payment_status !== "Paid" || !order.seller_id) return;
 
+  // Database RPC performs the wallet/ledger credit atomically and idempotently.
   const { data, error } = await supabase.rpc("credit_seller_order_earning", {
     p_order_id: order.id,
     p_commission_rate: commissionRate,
   });
-
-  if (error) throw new Error(`Seller earning credit failed: ${error.message}`);
+  if (error) {
+    console.error("[sellerWalletLedger] atomic earning credit:", error.message);
+    return;
+  }
   const result = data as { ok?: boolean; error?: string } | null;
-  if (!result?.ok) throw new Error(result?.error ?? "Seller earning credit failed");
-
-  if (order.status === "Delivered") {
-    await releaseOrderEarning(supabase, order, commissionRate);
+  if (result?.ok === false) {
+    console.warn("[sellerWalletLedger] earning credit skipped:", result.error ?? "unknown error");
   }
 }
 
 export async function releaseOrderEarning(
-  supabase: SupabaseClient, order: OrderRow, commissionRate: number
+  supabase: SupabaseClient,
+  order: OrderRow,
+  commissionRate: number
 ): Promise<void> {
-  if (order.payment_status !== "Paid" || order.status !== "Delivered" || !order.seller_id) return;
+  if (order.payment_status !== "Paid" || order.status !== "Delivered" || !order.seller_id) {
+    return;
+  }
+
   const wallet = await getOrCreateSellerWallet(supabase, order.seller_id, commissionRate);
   if (!wallet) return;
-  const { data: earning } = await supabase.from("wallet_transactions").select("id")
-    .eq("wallet_id", wallet.id).eq("order_id", order.id).eq("category", "order_earning").maybeSingle();
-  if (!earning) await creditOrderEarning(supabase, order, commissionRate);
+
   const { data, error } = await supabase.rpc("release_wallet_earning", {
-    p_wallet_type: "seller", p_wallet_id: wallet.id, p_order_or_booking_id: order.id,
+    p_wallet_type: "seller",
+    p_wallet_id: wallet.id,
+    p_order_or_booking_id: order.id,
     p_description: `Released — ${order.order_number}`,
   });
-  if (error) throw new Error(`Seller earning release failed: ${error.message}`);
+  if (error) {
+    console.error("[sellerWalletLedger] atomic earning release:", error.message);
+    return;
+  }
   const result = data as { ok?: boolean; error?: string } | null;
-  if (!result?.ok) throw new Error(result?.error ?? "Seller earning release failed");
+  if (result?.ok === false) {
+    console.warn("[sellerWalletLedger] earning release skipped:", result.error ?? "unknown error");
+  }
 }
 
 export async function reverseOrderEarning(
-  supabase: SupabaseClient, order: OrderRow, commissionRate: number
+  supabase: SupabaseClient,
+  order: OrderRow,
+  commissionRate: number
 ): Promise<void> {
   if (!order.seller_id) return;
+
   const wallet = await getOrCreateSellerWallet(supabase, order.seller_id, commissionRate);
   if (!wallet) return;
+
   const { data, error } = await supabase.rpc("reverse_wallet_earning", {
-    p_wallet_type: "seller", p_wallet_id: wallet.id, p_order_or_booking_id: order.id,
+    p_wallet_type: "seller",
+    p_wallet_id: wallet.id,
+    p_order_or_booking_id: order.id,
     p_description: `Reversal — ${order.order_number}`,
   });
-  if (error) throw new Error(`Seller earning reversal failed: ${error.message}`);
+  if (error) {
+    console.error("[sellerWalletLedger] atomic earning reversal:", error.message);
+    return;
+  }
   const result = data as { ok?: boolean; error?: string } | null;
-  if (!result?.ok) throw new Error(result?.error ?? "Seller earning reversal failed");
+  if (result?.ok === false) {
+    console.warn("[sellerWalletLedger] earning reversal skipped:", result.error ?? "unknown error");
+  }
 }
 
 export async function syncSellerWalletFromOrders(
