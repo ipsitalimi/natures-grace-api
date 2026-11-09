@@ -9,8 +9,14 @@ export function registerBookingCancellationRoutes(app: Express): void {
     if (!user) return;
 
     const bookingId = String(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
-    const { notes } = req.body as { notes?: string };
-    if (!bookingId) return res.status(400).json({ error: "Booking id is required" });
+    const body = req.body as { notes?: unknown } | null;
+    if (!bookingId || bookingId === "undefined" || bookingId === "null") {
+      return res.status(400).json({ error: "Booking id is required" });
+    }
+    if (body?.notes !== undefined && body.notes !== null && typeof body.notes !== "string") {
+      return res.status(400).json({ error: "Cancellation notes must be text" });
+    }
+    const notes = typeof body?.notes === "string" ? body.notes.trim().slice(0, 1000) : "";
 
     const supabase = requireSupabaseAdmin();
     const { data: booking, error: bookingError } = await supabase
@@ -55,7 +61,7 @@ export function registerBookingCancellationRoutes(app: Express): void {
     const { data, error } = await supabase.rpc("cancel_user_practitioner_booking", {
       p_booking_id: bookingId,
       p_user_id: user.id,
-      p_description: notes?.trim() || null,
+      p_description: notes || null,
       p_cancellation_policy_snapshot: policySnapshot,
       p_refund_amount: refundAmount,
     });
