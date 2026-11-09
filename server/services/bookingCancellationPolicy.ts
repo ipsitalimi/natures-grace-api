@@ -60,8 +60,8 @@ export function getBookingSessionStart(sessionDate: string, sessionTime: string)
   }
 
   // Booking dates are stored as YYYY-MM-DD and times commonly as 2:30 PM.
-  const match = time.match(/^(\\d{1,2})(?::(\\d{2}))?\\s*(AM|PM)$/i);
-  if (/^\\d{4}-\\d{2}-\\d{2}$/.test(date) && match) {
+  const match = time.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/i);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date) && match) {
     let hours = Number(match[1]) % 12;
     if (match[3].toUpperCase() === "PM") hours += 12;
     const minutes = Number(match[2] ?? "0");
