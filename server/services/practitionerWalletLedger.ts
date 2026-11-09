@@ -107,38 +107,13 @@ export async function creditBookingEarning(
     return;
   }
 
-  const wallet = await getOrCreatePractitionerWallet(
-    supabase,
-    booking.practitioner_id,
-    commissionRate
-  );
-  if (!wallet) return;
-
-  if (await hasTxn(supabase, wallet.id, booking.id, "booking_earning")) return;
-
-  const net = netEarning(Number(booking.amount), commissionRate);
-
-  const { error: earningInsertError } = await supabase.from("practitioner_wallet_transactions").insert({
-    wallet_id: wallet.id,
-    booking_id: booking.id,
-    type: "credit",
-    category: "booking_earning",
-    amount: net,
-    description: `Session ${booking.booking_number} — ${booking.service_name}`,
-    is_released: false,
+  const { data, error } = await supabase.rpc("credit_practitioner_booking_earning", {
+    p_booking_id: booking.id,
+    p_commission_rate: commissionRate,
   });
-
-  // The unique booking_earning index makes this insert the idempotency gate.
-  // Do not update balances when the ledger row was not inserted.
-  if (earningInsertError) {
-    if (earningInsertError.code === "23505") return;
-    throw new Error(`Could not record practitioner earning: ${earningInsertError.message}`);
-  }
-
-  await updateWallet(supabase, wallet.id, {
-    total_earned: Number(wallet.total_earned) + net,
-    held_balance: Number(wallet.held_balance) + net,
-  });
+  if (error) throw new Error(`Practitioner earning credit failed: ${error.message}`);
+  const result = data as { ok?: boolean; error?: string } | null;
+  if (!result?.ok) throw new Error(result?.error ?? "Practitioner earning credit failed");
 
   if (booking.booking_status === "Completed") {
     await releaseBookingEarning(supabase, booking, commissionRate);
