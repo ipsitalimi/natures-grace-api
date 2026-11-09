@@ -172,11 +172,18 @@ export function registerAdminOperationsRoutes(app: Express) {
     const admin = await requireRole(req, res, "Admin");
     if (!admin) return;
 
-    const { status, adminNotes } = req.body as {
-      status: "in_review" | "approved" | "rejected";
-      adminNotes?: string;
-    };
+    const body = req.body as { status?: unknown; adminNotes?: unknown };
+    const status = body.status;
+    const allowedRefundStatuses = ["in_review", "approved", "rejected"] as const;
+    if (typeof status !== "string" || !allowedRefundStatuses.includes(status as typeof allowedRefundStatuses[number])) {
+      return res.status(400).json({ error: "Invalid refund status" });
+    }
+    if (body.adminNotes !== undefined && body.adminNotes !== null && typeof body.adminNotes !== "string") {
+      return res.status(400).json({ error: "Admin notes must be text" });
+    }
+    const adminNotes = typeof body.adminNotes === "string" ? body.adminNotes.trim().slice(0, 2000) : null;
     const refundId = String(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
+    if (!refundId) return res.status(400).json({ error: "Refund request id is required" });
     const supabase = requireSupabaseAdmin();
 
     const { data: existing, error: fetchError } = await supabase
@@ -362,20 +369,31 @@ export function registerAdminOperationsRoutes(app: Express) {
       }
     }
 
-    const { data: refund, error } = await supabase
+    let finalUpdate = supabase
       .from("refund_requests")
       .update({
         status,
-        admin_notes: adminNotes ?? null,
+        admin_notes: adminNotes,
         reviewed_by: admin.id,
         reviewed_at: new Date().toISOString(),
         processed_at: status === "approved" ? new Date().toISOString() : null,
       })
       .eq("id", refundId)
-      .select()
-      .single();
+      .not("status", "in", '("approved","rejected")');
 
+    // Prevent review/rejection from racing an approval that has already claimed
+    // the request, and require the approval claim before finalizing approval.
+    if (status === "approved") {
+      finalUpdate = finalUpdate.not("processing_started_at", "is", null);
+    } else {
+      finalUpdate = finalUpdate.is("processing_started_at", null);
+    }
+
+    const { data: refund, error } = await finalUpdate.select().maybeSingle();
     if (error) return res.status(400).json({ error: error.message });
+    if (!refund) {
+      return res.status(409).json({ error: "Refund status changed concurrently; refresh and reconcile before retrying." });
+    }
 
     if (status === "approved") {
       await dispatchUserNotification(supabase, {
