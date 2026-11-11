@@ -123,6 +123,7 @@ export async function confirmBookingPayment(params: {
   paymentId: string;
   signature?: string;
   devMode?: boolean;
+  expectedAmountPaise?: number;
 }): Promise<ConfirmPaymentResult> {
   if (params.devMode || params.orderId.startsWith("order_dev_")) {
     if (isProduction()) {
@@ -140,5 +141,26 @@ export async function confirmBookingPayment(params: {
     return { ok: false, error: "Invalid payment signature" };
   }
 
-  return { ok: true, paymentId: params.paymentId, orderId: params.orderId };
+  const auth = getAuthHeader();
+  if (!auth) return { ok: false, error: "Razorpay is not configured" };
+
+  try {
+    const response = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(params.paymentId)}`, {
+      headers: { Authorization: auth },
+    });
+    const payment = await response.json() as {
+      id?: string; order_id?: string; amount?: number; currency?: string; status?: string;
+      error?: { description?: string };
+    };
+    if (!response.ok) return { ok: false, error: payment.error?.description ?? "Unable to verify payment with Razorpay" };
+    if (payment.order_id !== params.orderId) return { ok: false, error: "Payment does not belong to this order" };
+    if (payment.status !== "captured") return { ok: false, error: "Payment has not been captured" };
+    if (payment.currency !== "INR") return { ok: false, error: "Payment currency mismatch" };
+    if (params.expectedAmountPaise != null && payment.amount !== params.expectedAmountPaise) {
+      return { ok: false, error: "Paid amount does not match checkout total" };
+    }
+    return { ok: true, paymentId: params.paymentId, orderId: params.orderId };
+  } catch {
+    return { ok: false, error: "Could not verify payment with Razorpay" };
+  }
 }

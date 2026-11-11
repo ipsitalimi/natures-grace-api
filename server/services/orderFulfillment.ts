@@ -13,44 +13,20 @@ type StoreOrderRow = {
   total: number;
   seller_promo_id?: string | null;
   platform_promo_id?: string | null;
+  razorpay_order_id?: string | null;
+  razorpay_payment_id?: string | null;
 };
 
 async function decrementOrderStock(
   supabase: SupabaseClient,
   orderId: string
 ): Promise<void> {
-  const { data: items } = await supabase
-    .from("order_items")
-    .select("product_id, quantity")
-    .eq("order_id", orderId);
-
-  for (const item of items ?? []) {
-    const productId = (item as { product_id: string }).product_id;
-    const qty = Number((item as { quantity: number }).quantity) || 0;
-    if (!productId || qty <= 0) continue;
-
-    const { data: product } = await supabase
-      .from("products")
-      .select("stock")
-      .eq("id", productId)
-      .gte("stock", qty)
-      .maybeSingle();
-
-    if (!product) continue;
-    const currentStock = Number(product.stock);
-    const nextStock = currentStock - qty;
-    const { data: updated } = await supabase
-      .from("products")
-      .update({ stock: nextStock })
-      .eq("id", productId)
-      .eq("stock", currentStock)
-      .select("id")
-      .maybeSingle();
-
-    if (!updated) {
-      console.warn(`[orderFulfillment] stock race for product ${productId}, order ${orderId}`);
-    }
-  }
+  const { data, error } = await supabase.rpc("decrement_paid_store_order_stock", {
+    p_order_id: orderId,
+  });
+  if (error) throw new Error(`Order stock decrement failed: ${error.message}`);
+  const result = data as { ok?: boolean; error?: string } | null;
+  if (!result?.ok) throw new Error(result?.error ?? "Order stock decrement failed");
 }
 
 /** Restore product stock when an order refund is approved. */
@@ -58,58 +34,40 @@ export async function restoreOrderStock(
   supabase: SupabaseClient,
   orderId: string
 ): Promise<void> {
-  const { data: items } = await supabase
-    .from("order_items")
-    .select("product_id, quantity")
-    .eq("order_id", orderId);
-
-  for (const item of items ?? []) {
-    const productId = (item as { product_id: string }).product_id;
-    const qty = Number((item as { quantity: number }).quantity) || 0;
-    if (!productId || qty <= 0) continue;
-
-    const { data: product } = await supabase
-      .from("products")
-      .select("stock")
-      .eq("id", productId)
-      .maybeSingle();
-
-    if (!product) continue;
-    const nextStock = Number(product.stock) + qty;
-    await supabase.from("products").update({ stock: nextStock }).eq("id", productId);
-  }
+  const { data, error } = await supabase.rpc("restore_store_order_stock", {
+    p_order_id: orderId,
+  });
+  if (error) throw new Error(`Order stock restoration failed: ${error.message}`);
+  const result = data as { ok?: boolean; error?: string } | null;
+  if (!result?.ok) throw new Error(result?.error ?? "Order stock restoration failed");
 }
 
-async function adjustPromoUsage(
+async function restorePromoUsage(
   supabase: SupabaseClient,
+  orderId: string,
   promoId: string,
-  table: "seller_promos" | "platform_promo_codes",
-  delta: number
+  promoType: "seller" | "platform"
 ): Promise<void> {
-  const { data: promoRow } = await supabase
-    .from(table)
-    .select("usage_count")
-    .eq("id", promoId)
-    .maybeSingle();
-  const current = promoRow?.usage_count;
-  if (typeof current === "number") {
-    await supabase
-      .from(table)
-      .update({ usage_count: Math.max(0, current + delta) })
-      .eq("id", promoId);
-  }
+  const { data, error } = await supabase.rpc("restore_store_order_promo_usage", {
+    p_order_id: orderId,
+    p_promo_id: promoId,
+    p_promo_type: promoType,
+  });
+  if (error) throw new Error(`Promo usage restoration failed: ${error.message}`);
+  const result = data as { ok?: boolean; error?: string } | null;
+  if (!result?.ok) throw new Error(result?.error ?? "Promo usage restoration failed");
 }
 
 /** Decrement promo usage counters after a refunded order. */
 export async function restorePromoUsageOnRefund(
   supabase: SupabaseClient,
-  order: Pick<StoreOrderRow, "seller_promo_id" | "platform_promo_id">
+  order: Pick<StoreOrderRow, "id" | "seller_promo_id" | "platform_promo_id">
 ): Promise<void> {
   if (order.seller_promo_id) {
-    await adjustPromoUsage(supabase, order.seller_promo_id, "seller_promos", -1);
+    await restorePromoUsage(supabase, order.id, order.seller_promo_id, "seller");
   }
   if (order.platform_promo_id) {
-    await adjustPromoUsage(supabase, order.platform_promo_id, "platform_promo_codes", -1);
+    await restorePromoUsage(supabase, order.id, order.platform_promo_id, "platform");
   }
 }
 
@@ -117,36 +75,19 @@ async function incrementPromoUsage(
   supabase: SupabaseClient,
   order: StoreOrderRow
 ): Promise<void> {
-  const promoId = order.seller_promo_id;
-  if (promoId) {
-    const { data: promoRow } = await supabase
-      .from("seller_promos")
-      .select("usage_count")
-      .eq("id", promoId)
-      .maybeSingle();
-    const current = promoRow?.usage_count;
-    if (typeof current === "number") {
-      await supabase
-        .from("seller_promos")
-        .update({ usage_count: current + 1 })
-        .eq("id", promoId);
-    }
-  }
+  const promos: Array<{ id: string; type: "seller" | "platform" }> = [];
+  if (order.seller_promo_id) promos.push({ id: order.seller_promo_id, type: "seller" });
+  if (order.platform_promo_id) promos.push({ id: order.platform_promo_id, type: "platform" });
 
-  const platId = order.platform_promo_id;
-  if (platId) {
-    const { data: platRow } = await supabase
-      .from("platform_promo_codes")
-      .select("usage_count")
-      .eq("id", platId)
-      .maybeSingle();
-    const pcur = platRow?.usage_count;
-    if (typeof pcur === "number") {
-      await supabase
-        .from("platform_promo_codes")
-        .update({ usage_count: pcur + 1 })
-        .eq("id", platId);
-    }
+  for (const promo of promos) {
+    const { data, error } = await supabase.rpc("apply_store_order_promo_usage", {
+      p_order_id: order.id,
+      p_promo_id: promo.id,
+      p_promo_type: promo.type,
+    });
+    if (error) throw new Error(`Promo usage update failed: ${error.message}`);
+    const result = data as { ok?: boolean; error?: string } | null;
+    if (!result?.ok) throw new Error(result?.error ?? "Promo usage update failed");
   }
 }
 
@@ -186,7 +127,7 @@ export async function fulfillStoreOrderPayment(params: {
   const { data: existing, error: fetchError } = await supabase
     .from("orders")
     .select(
-      "id, order_number, user_id, payment_status, status, seller_id, total, seller_promo_id, platform_promo_id"
+      "id, order_number, user_id, payment_status, status, seller_id, total, seller_promo_id, platform_promo_id, razorpay_order_id, razorpay_payment_id"
     )
     .eq("id", storeOrderId)
     .maybeSingle();
@@ -197,27 +138,34 @@ export async function fulfillStoreOrderPayment(params: {
 
   const order = existing as StoreOrderRow;
 
-  if (order.payment_status === "Paid") {
-    return { ok: true, orderNumber: order.order_number as string, alreadyPaid: true };
+  let alreadyPaid = order.payment_status === "Paid";
+  if (alreadyPaid && (
+    order.razorpay_order_id !== razorpayOrderId ||
+    order.razorpay_payment_id !== paymentId
+  )) {
+    return { ok: false, error: "Paid order does not match this Razorpay payment" };
   }
 
-  if (order.payment_status !== "Pending") {
+  if (!alreadyPaid && order.payment_status !== "Pending") {
     return { ok: false, error: "Order is not awaiting payment" };
   }
 
-  const { data: updated, error: updateError } = await supabase
-    .from("orders")
-    .update({
-      payment_status: "Paid",
-      razorpay_order_id: razorpayOrderId,
-      razorpay_payment_id: paymentId,
-    })
-    .eq("id", storeOrderId)
-    .eq("payment_status", "Pending")
-    .select(
-      "id, order_number, user_id, payment_status, status, seller_id, total, seller_promo_id, platform_promo_id"
-    )
-    .maybeSingle();
+  let updated: StoreOrderRow | null = null;
+  if (!alreadyPaid) {
+    const { data: paidOrder, error: updateError } = await supabase
+      .from("orders")
+      .update({
+        payment_status: "Paid",
+        razorpay_order_id: razorpayOrderId,
+        razorpay_payment_id: paymentId,
+      })
+      .eq("id", storeOrderId)
+      .eq("payment_status", "Pending")
+      .select(
+        "id, order_number, user_id, payment_status, status, seller_id, total, seller_promo_id, platform_promo_id, razorpay_order_id, razorpay_payment_id"
+      )
+      .maybeSingle();
+    updated = paidOrder as StoreOrderRow | null;
 
   if (updateError) {
     return { ok: false, error: updateError.message };
@@ -231,17 +179,23 @@ export async function fulfillStoreOrderPayment(params: {
       .maybeSingle();
 
     if (recheck?.payment_status === "Paid") {
-      return {
-        ok: true,
-        orderNumber: recheck.order_number as string,
-        alreadyPaid: true,
-      };
+      const { data: paidRow } = await supabase
+        .from("orders")
+        .select("id, order_number, user_id, payment_status, status, seller_id, total, seller_promo_id, platform_promo_id, razorpay_order_id, razorpay_payment_id")
+        .eq("id", storeOrderId)
+        .maybeSingle();
+      if (!paidRow || paidRow.razorpay_order_id !== razorpayOrderId || paidRow.razorpay_payment_id !== paymentId) {
+        return { ok: false, error: "Paid order does not match this Razorpay payment" };
+      }
+      updated = paidRow as StoreOrderRow;
+      alreadyPaid = true;
+    } else {
+      return { ok: false, error: "Order is not awaiting payment" };
     }
-
-    return { ok: false, error: "Order is not awaiting payment" };
+  }
   }
 
-  const orderAfterPay = updated as StoreOrderRow;
+  const orderAfterPay = (updated ?? order) as StoreOrderRow;
 
   const commissionRate =
     params.commissionRate ?? (await fetchCommissionRate(supabase));
@@ -262,7 +216,7 @@ export async function fulfillStoreOrderPayment(params: {
     commissionRate
   );
 
-  await dispatchUserNotification(supabase, {
+  if (!alreadyPaid) await dispatchUserNotification(supabase, {
     userId: orderAfterPay.user_id,
     event: "order_confirmed",
     message: `Order ${orderAfterPay.order_number} confirmed. Payment received.`,
@@ -274,11 +228,11 @@ export async function fulfillStoreOrderPayment(params: {
     },
   });
 
-  await notifySellerNewOrder(supabase, orderAfterPay);
+  if (!alreadyPaid) await notifySellerNewOrder(supabase, orderAfterPay);
 
   return {
     ok: true,
     orderNumber: orderAfterPay.order_number as string,
-    alreadyPaid: false,
+    alreadyPaid,
   };
 }

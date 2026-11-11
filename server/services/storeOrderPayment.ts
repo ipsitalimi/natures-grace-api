@@ -59,11 +59,20 @@ export async function createStoreRazorpayOrder(params: {
     return { ok: false, error: result.error };
   }
 
-  await supabase
+  const { data: linkedOrder, error: linkError } = await supabase
     .from("orders")
     .update({ razorpay_order_id: result.orderId })
     .eq("id", params.storeOrderId)
-    .eq("payment_status", "Pending");
+    .eq("payment_status", "Pending")
+    .select("id")
+    .maybeSingle();
+
+  if (linkError || !linkedOrder) {
+    return {
+      ok: false,
+      error: linkError?.message ?? "Could not link payment order to store order",
+    };
+  }
 
   const keyId = process.env.RAZORPAY_KEY_ID?.trim() ?? null;
 
@@ -93,7 +102,7 @@ export async function confirmStoreOrderPayment(params: {
 
   const { data: existing, error: fetchError } = await supabase
     .from("orders")
-    .select("id, user_id, payment_status, order_number")
+    .select("id, user_id, payment_status, order_number, razorpay_order_id, total")
     .eq("id", params.storeOrderId)
     .maybeSingle();
 
@@ -105,23 +114,25 @@ export async function confirmStoreOrderPayment(params: {
     return { ok: false, error: "Order does not belong to this account" };
   }
 
+  if (existing.razorpay_order_id !== params.razorpayOrderId) {
+    return { ok: false, error: "Payment does not belong to this store order" };
+  }
+
+  const expectedAmountPaise = Math.round(Number(existing.total) * 100);
+  if (!Number.isFinite(expectedAmountPaise) || expectedAmountPaise < 100) {
+    return { ok: false, error: "Store order total is invalid" };
+  }
+
   const verified = await confirmBookingPayment({
     orderId: params.razorpayOrderId,
     paymentId: params.paymentId,
     signature: params.signature,
     devMode: params.devMode,
+    expectedAmountPaise,
   });
 
   if (!verified.ok) {
     return { ok: false, error: verified.error };
-  }
-
-  if (existing.payment_status === "Paid") {
-    return {
-      ok: true,
-      paymentId: verified.paymentId,
-      orderNumber: existing.order_number as string,
-    };
   }
 
   const fulfilled = await fulfillStoreOrderPayment({

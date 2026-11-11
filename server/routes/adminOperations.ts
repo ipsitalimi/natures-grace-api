@@ -6,7 +6,8 @@ import { sendEmailToUserId } from "../services/email/emailService";
 import { insertActivityLog } from "../services/activityLogAdmin";
 import { createRazorpayRefund } from "../services/razorpayRefund";
 import { reverseOrderEarning } from "../services/sellerWalletLedger";
-import { reverseBookingEarning } from "../services/practitionerWalletLedger";
+import { reverseBookingEarning, reverseBookingEarningForRefund } from "../services/practitionerWalletLedger";
+import { calculateBookingRefund, fetchBookingCancellationPolicy } from "../services/bookingCancellationPolicy";
 import { fetchCommissionRate } from "../services/platformSettings";
 import {
   restoreOrderStock,
@@ -22,66 +23,35 @@ async function updateSellerPayoutStatus(
   rejectionReason?: string
 ) {
   const supabase = requireSupabaseAdmin();
-
-  const { data: payout } = await supabase
+  const { data: payout, error: fetchError } = await supabase
     .from("seller_payouts")
-    .select("*, seller_wallets(seller_id, sellers(profile_id))")
+    .select("amount, seller_wallets(sellers(profile_id))")
     .eq("id", payoutId)
     .maybeSingle();
-
+  if (fetchError) return { error: fetchError.message };
   if (!payout) return { error: "Payout not found" };
 
-  const patch: Record<string, unknown> = {
-    status,
-    processed_by: adminId,
-    updated_at: new Date().toISOString(),
-  };
-  if (status === "Completed") patch.completed_at = new Date().toISOString();
-  if (status === "Rejected") {
-    patch.rejection_reason = rejectionReason ?? "Rejected by admin";
-    const amount = Number((payout as { amount: number }).amount);
-    const walletId = (payout as { wallet_id: string }).wallet_id;
-    const { data: wallet } = await supabase
-      .from("seller_wallets")
-      .select("available_balance, pending_payout")
-      .eq("id", walletId)
-      .single();
-    if (wallet) {
-      await supabase
-        .from("seller_wallets")
-        .update({
-          available_balance: Number(wallet.available_balance) + amount,
-          pending_payout: Math.max(0, Number(wallet.pending_payout) - amount),
-        })
-        .eq("id", walletId);
-    }
-  }
+  const { data, error } = await supabase.rpc("admin_update_payout_status", {
+    p_payout_type: "seller", p_payout_id: payoutId, p_status: status,
+    p_admin_id: adminId, p_rejection_reason: rejectionReason ?? null,
+  });
+  if (error) return { error: error.message };
+  const result = data as { ok?: boolean; error?: string } | null;
+  if (!result?.ok) return { error: result?.error ?? "Could not update payout status" };
 
-  await supabase.from("seller_payouts").update(patch).eq("id", payoutId);
-
-  const profileId =
-    (payout as { seller_wallets?: { sellers?: { profile_id?: string } } }).seller_wallets?.sellers
-      ?.profile_id ?? null;
-
+  const profileId = (payout as { seller_wallets?: { sellers?: { profile_id?: string } } })
+    .seller_wallets?.sellers?.profile_id ?? null;
   if (profileId) {
     const amountStr = `₹${Number((payout as { amount: number }).amount).toLocaleString("en-IN")}`;
-    if (status === "Completed") {
-      await dispatchUserNotification(supabase, {
-        userId: profileId,
-        event: "withdrawal_completed",
-        message: `Your withdrawal of ${amountStr} has been completed.`,
-        linkRoute: "Main",
-      });
-    } else if (status === "Rejected") {
-      await dispatchUserNotification(supabase, {
-        userId: profileId,
-        event: "withdrawal_received",
-        message: `Your withdrawal request was not approved. Funds returned to your wallet.`,
-        linkRoute: "Main",
-      });
-    }
+    if (status === "Completed") await dispatchUserNotification(supabase, {
+      userId: profileId, event: "withdrawal_completed",
+      message: `Your withdrawal of ${amountStr} has been completed.`, linkRoute: "Main",
+    });
+    else if (status === "Rejected") await dispatchUserNotification(supabase, {
+      userId: profileId, event: "withdrawal_received",
+      message: "Your withdrawal request was not approved. Funds returned to your wallet.", linkRoute: "Main",
+    });
   }
-
   return { ok: true };
 }
 
@@ -92,57 +62,31 @@ async function updatePractitionerPayoutStatus(
   rejectionReason?: string
 ) {
   const supabase = requireSupabaseAdmin();
-
-  const { data: payout } = await supabase
+  const { data: payout, error: fetchError } = await supabase
     .from("practitioner_payouts")
-    .select("*, practitioner_wallets(practitioner_id, practitioners(profile_id))")
+    .select("amount, practitioner_wallets(practitioners(profile_id))")
     .eq("id", payoutId)
     .maybeSingle();
-
+  if (fetchError) return { error: fetchError.message };
   if (!payout) return { error: "Payout not found" };
 
-  const patch: Record<string, unknown> = {
-    status,
-    processed_by: adminId,
-    updated_at: new Date().toISOString(),
-  };
-  if (status === "Completed") patch.completed_at = new Date().toISOString();
-  if (status === "Rejected") {
-    patch.rejection_reason = rejectionReason ?? "Rejected by admin";
-    const amount = Number((payout as { amount: number }).amount);
-    const walletId = (payout as { wallet_id: string }).wallet_id;
-    const { data: wallet } = await supabase
-      .from("practitioner_wallets")
-      .select("available_balance, pending_payout")
-      .eq("id", walletId)
-      .single();
-    if (wallet) {
-      await supabase
-        .from("practitioner_wallets")
-        .update({
-          available_balance: Number(wallet.available_balance) + amount,
-          pending_payout: Math.max(0, Number(wallet.pending_payout) - amount),
-        })
-        .eq("id", walletId);
-    }
-  }
+  const { data, error } = await supabase.rpc("admin_update_payout_status", {
+    p_payout_type: "practitioner", p_payout_id: payoutId, p_status: status,
+    p_admin_id: adminId, p_rejection_reason: rejectionReason ?? null,
+  });
+  if (error) return { error: error.message };
+  const result = data as { ok?: boolean; error?: string } | null;
+  if (!result?.ok) return { error: result?.error ?? "Could not update payout status" };
 
-  await supabase.from("practitioner_payouts").update(patch).eq("id", payoutId);
-
-  const profileId =
-    (payout as { practitioner_wallets?: { practitioners?: { profile_id?: string } } })
-      .practitioner_wallets?.practitioners?.profile_id ?? null;
-
+  const profileId = (payout as { practitioner_wallets?: { practitioners?: { profile_id?: string } } })
+    .practitioner_wallets?.practitioners?.profile_id ?? null;
   if (profileId && status === "Completed") {
     const amountStr = `₹${Number((payout as { amount: number }).amount).toLocaleString("en-IN")}`;
     await dispatchUserNotification(supabase, {
-      userId: profileId,
-      event: "withdrawal_completed",
-      message: `Your withdrawal of ${amountStr} has been completed.`,
-      linkRoute: "Main",
+      userId: profileId, event: "withdrawal_completed",
+      message: `Your withdrawal of ${amountStr} has been completed.`, linkRoute: "Main",
     });
   }
-
   return { ok: true };
 }
 
@@ -228,11 +172,18 @@ export function registerAdminOperationsRoutes(app: Express) {
     const admin = await requireRole(req, res, "Admin");
     if (!admin) return;
 
-    const { status, adminNotes } = req.body as {
-      status: "in_review" | "approved" | "rejected";
-      adminNotes?: string;
-    };
+    const body = req.body as { status?: unknown; adminNotes?: unknown };
+    const status = body.status;
+    const allowedRefundStatuses = ["in_review", "approved", "rejected"] as const;
+    if (typeof status !== "string" || !allowedRefundStatuses.includes(status as typeof allowedRefundStatuses[number])) {
+      return res.status(400).json({ error: "Invalid refund status" });
+    }
+    if (body.adminNotes !== undefined && body.adminNotes !== null && typeof body.adminNotes !== "string") {
+      return res.status(400).json({ error: "Admin notes must be text" });
+    }
+    const adminNotes = typeof body.adminNotes === "string" ? body.adminNotes.trim().slice(0, 2000) : null;
     const refundId = String(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
+    if (!refundId) return res.status(400).json({ error: "Refund request id is required" });
     const supabase = requireSupabaseAdmin();
 
     const { data: existing, error: fetchError } = await supabase
@@ -250,6 +201,20 @@ export function registerAdminOperationsRoutes(app: Express) {
       return res.status(409).json({ error: `Refund already ${existingStatus}` });
     }
 
+    // Atomically claim approval to prevent concurrent admins from triggering duplicate refunds.
+    // If the gateway outcome is uncertain, leave this claim for manual reconciliation.
+    if (status === "approved") {
+      if ((existing as { processing_started_at?: string | null }).processing_started_at) {
+        return res.status(409).json({ error: "Refund processing was already started. Reconcile Razorpay before retrying." });
+      }
+      const { data: claimed, error: claimError } = await supabase.from("refund_requests")
+        .update({ processing_started_at: new Date().toISOString() })
+        .eq("id", refundId).is("processing_started_at", null)
+        .not("status", "in", '("approved","rejected")').select("id").maybeSingle();
+      if (claimError || !claimed) {
+        return res.status(409).json({ error: "Refund is already being processed or requires reconciliation." });
+      }
+    }
     const userId = (existing as { user_id: string }).user_id;
     const orderId = (existing as { order_id?: string | null }).order_id;
     const bookingId = (existing as { booking_id?: string | null }).booking_id;
@@ -279,6 +244,12 @@ export function registerAdminOperationsRoutes(app: Express) {
           });
           if (!razorpayRefund.ok) {
             refundError = razorpayRefund.error;
+          } else {
+            const { error: auditError } = await supabase.from("refund_requests").update({
+              razorpay_refund_id: razorpayRefund.refundId,
+              refund_amount: Number(order.total),
+            }).eq("id", refundId);
+            if (auditError) refundError = auditError.message;
           }
         }
 
@@ -297,6 +268,7 @@ export function registerAdminOperationsRoutes(app: Express) {
           );
           await restoreOrderStock(supabase, orderId);
           await restorePromoUsageOnRefund(supabase, {
+            id: orderId,
             seller_promo_id: (order as { seller_promo_id?: string | null }).seller_promo_id ?? null,
             platform_promo_id: (order as { platform_promo_id?: string | null }).platform_promo_id ?? null,
           });
@@ -309,44 +281,86 @@ export function registerAdminOperationsRoutes(app: Express) {
         const { data: booking } = await supabase
           .from("practitioner_bookings")
           .select(
-            "id, booking_number, practitioner_id, booking_status, payment_status, amount, service_name, razorpay_payment_id"
+            "id, booking_number, practitioner_id, booking_status, payment_status, amount, total_paid_amount_inr, service_name, razorpay_payment_id, session_date, session_time"
           )
           .eq("id", bookingId)
           .maybeSingle();
 
         if (!booking) {
           refundError = "Booking not found";
-        } else if (!booking.razorpay_payment_id) {
-          refundError = "Booking has no Razorpay payment ID — process refund manually";
         } else {
-          const razorpayRefund = await createRazorpayRefund({
-            paymentId: booking.razorpay_payment_id as string,
-            amountInr: Number(booking.amount),
-            notes: { refund_request_id: refundId },
-          });
-          if (!razorpayRefund.ok) {
-            refundError = razorpayRefund.error;
-          }
-        }
+          const savedSnapshot = (existing as { cancellation_policy_snapshot?: Record<string, unknown> | null }).cancellation_policy_snapshot;
+          let policySnapshot: Record<string, unknown>;
+          let refundAmountInr: number;
 
-        if (!refundError && booking) {
-          await reverseBookingEarning(
-            supabase,
-            {
-              id: booking.id,
-              booking_number: booking.booking_number,
-              practitioner_id: booking.practitioner_id,
-              booking_status: booking.booking_status,
-              payment_status: booking.payment_status,
-              amount: Number(booking.amount),
-              service_name: booking.service_name,
-            },
-            commissionRate
-          );
-          await supabase
-            .from("practitioner_bookings")
-            .update({ payment_status: "Refunded", booking_status: "Cancelled" })
-            .eq("id", bookingId);
+          if (savedSnapshot && typeof savedSnapshot.refundAmountInr === "number") {
+            policySnapshot = savedSnapshot;
+            refundAmountInr = Number((existing as { refund_amount?: number | null }).refund_amount ?? savedSnapshot.refundAmountInr);
+          } else {
+            const policy = await fetchBookingCancellationPolicy(supabase);
+            const calculation = calculateBookingRefund({
+              amountInr: Number(booking.amount),
+              sessionDate: String(booking.session_date ?? ""),
+              sessionTime: String(booking.session_time ?? ""),
+              policy,
+            });
+            if ("error" in calculation) {
+              refundError = calculation.error;
+              policySnapshot = {};
+              refundAmountInr = 0;
+            } else {
+              refundAmountInr = calculation.refundAmountInr;
+              policySnapshot = {
+                freeCancellationHours: policy.freeCancellationHours,
+                cancellationFeePercent: policy.cancellationFeePercent,
+                sessionStartsAt: calculation.sessionStartsAt,
+                hoursUntilSession: calculation.hoursUntilSession,
+                freeCancellation: calculation.freeCancellation,
+                appliedFeePercent: calculation.cancellationFeePercent,
+                refundPercent: calculation.refundPercent,
+                bookingAmountInr: Number(booking.amount),
+                refundAmountInr,
+              };
+              const { error: snapshotError } = await supabase.from("refund_requests").update({
+                cancellation_policy_snapshot: policySnapshot, refund_amount: refundAmountInr,
+              }).eq("id", refundId);
+              if (snapshotError) refundError = snapshotError.message;
+            }
+          }
+
+          if (!refundError && refundAmountInr > 0 && !booking.razorpay_payment_id) {
+            refundError = "Booking has no Razorpay payment ID — process refund manually";
+          } else if (!refundError) {
+            if (!refundError && refundAmountInr > 0) {
+              const gatewayRefund = await createRazorpayRefund({
+                paymentId: booking.razorpay_payment_id as string, amountInr: refundAmountInr,
+                notes: { refund_request_id: refundId },
+              });
+              if (!gatewayRefund.ok) refundError = gatewayRefund.error;
+              else {
+                const { error: refundIdError } = await supabase.from("refund_requests")
+                  .update({ razorpay_refund_id: gatewayRefund.refundId }).eq("id", refundId);
+                if (refundIdError) refundError = refundIdError.message;
+              }
+            }
+            if (!refundError && refundAmountInr > 0) {
+              const reversal = await reverseBookingEarningForRefund(supabase, {
+                id: booking.id, booking_number: booking.booking_number, practitioner_id: booking.practitioner_id,
+                booking_status: booking.booking_status, payment_status: booking.payment_status,
+                amount: Number(booking.amount), service_name: booking.service_name,
+              }, refundId, refundAmountInr,
+              Number((booking as { total_paid_amount_inr?: number | null }).total_paid_amount_inr ?? booking.amount),
+              commissionRate);
+              if (reversal.error) refundError = reversal.error;
+            }
+            if (!refundError) {
+              const fullRefund = refundAmountInr >= Number((booking as { total_paid_amount_inr?: number | null }).total_paid_amount_inr ?? booking.amount);
+              const { error: bookingUpdateError } = await supabase.from("practitioner_bookings").update({
+                booking_status: "Cancelled", payment_status: fullRefund ? "Refunded" : booking.payment_status,
+              }).eq("id", bookingId);
+              if (bookingUpdateError) refundError = bookingUpdateError.message;
+            }
+          }
         }
       }
 
@@ -355,25 +369,39 @@ export function registerAdminOperationsRoutes(app: Express) {
       }
     }
 
-    const { data: refund, error } = await supabase
+    let finalUpdate = supabase
       .from("refund_requests")
       .update({
         status,
-        admin_notes: adminNotes ?? null,
+        admin_notes: adminNotes,
         reviewed_by: admin.id,
         reviewed_at: new Date().toISOString(),
+        processed_at: status === "approved" ? new Date().toISOString() : null,
       })
       .eq("id", refundId)
-      .select()
-      .single();
+      .not("status", "in", '("approved","rejected")');
 
+    // Prevent review/rejection from racing an approval that has already claimed
+    // the request, and require the approval claim before finalizing approval.
+    if (status === "approved") {
+      finalUpdate = finalUpdate.not("processing_started_at", "is", null);
+    } else {
+      finalUpdate = finalUpdate.is("processing_started_at", null);
+    }
+
+    const { data: refund, error } = await finalUpdate.select().maybeSingle();
     if (error) return res.status(400).json({ error: error.message });
+    if (!refund) {
+      return res.status(409).json({ error: "Refund status changed concurrently; refresh and reconcile before retrying." });
+    }
 
     if (status === "approved") {
       await dispatchUserNotification(supabase, {
         userId,
         event: "refund_approved",
-        message: "Your refund request has been approved. Funds will return within 7–10 business days.",
+        message: Number((refund as { refund_amount?: number | null }).refund_amount ?? 0) > 0
+          ? `Your refund of ₹${Number((refund as { refund_amount?: number | null }).refund_amount).toLocaleString("en-IN")} has been approved. Funds typically return within 7–10 business days.`
+          : "Your cancellation has been approved. No refund is due under the applicable cancellation policy.",
         linkRoute: "OrderHistory",
         emailVars: { reference: refundId },
       });

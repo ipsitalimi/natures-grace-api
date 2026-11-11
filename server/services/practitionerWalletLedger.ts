@@ -107,31 +107,13 @@ export async function creditBookingEarning(
     return;
   }
 
-  const wallet = await getOrCreatePractitionerWallet(
-    supabase,
-    booking.practitioner_id,
-    commissionRate
-  );
-  if (!wallet) return;
-
-  if (await hasTxn(supabase, wallet.id, booking.id, "booking_earning")) return;
-
-  const net = netEarning(Number(booking.amount), commissionRate);
-
-  await supabase.from("practitioner_wallet_transactions").insert({
-    wallet_id: wallet.id,
-    booking_id: booking.id,
-    type: "credit",
-    category: "booking_earning",
-    amount: net,
-    description: `Session ${booking.booking_number} — ${booking.service_name}`,
-    is_released: false,
+  const { data, error } = await supabase.rpc("credit_practitioner_booking_earning", {
+    p_booking_id: booking.id,
+    p_commission_rate: commissionRate,
   });
-
-  await updateWallet(supabase, wallet.id, {
-    total_earned: Number(wallet.total_earned) + net,
-    held_balance: Number(wallet.held_balance) + net,
-  });
+  if (error) throw new Error(`Practitioner earning credit failed: ${error.message}`);
+  const result = data as { ok?: boolean; error?: string } | null;
+  if (!result?.ok) throw new Error(result?.error ?? "Practitioner earning credit failed");
 
   if (booking.booking_status === "Completed") {
     await releaseBookingEarning(supabase, booking, commissionRate);
@@ -139,134 +121,83 @@ export async function creditBookingEarning(
 }
 
 export async function releaseBookingEarning(
-  supabase: SupabaseClient,
-  booking: BookingRow,
-  commissionRate: number
+  supabase: SupabaseClient, booking: BookingRow, commissionRate: number
 ): Promise<void> {
-  if (
-    booking.payment_status !== "Paid" ||
-    booking.booking_status !== "Completed" ||
-    !booking.practitioner_id
-  ) {
-    return;
-  }
-
-  const wallet = await getOrCreatePractitionerWallet(
-    supabase,
-    booking.practitioner_id,
-    commissionRate
-  );
+  if (booking.payment_status !== "Paid" || booking.booking_status !== "Completed" || !booking.practitioner_id) return;
+  const wallet = await getOrCreatePractitionerWallet(supabase, booking.practitioner_id, commissionRate);
   if (!wallet) return;
-
-  if (await hasTxn(supabase, wallet.id, booking.id, "earning_release")) return;
-
-  const { data: earning } = await supabase
-    .from("practitioner_wallet_transactions")
-    .select("*")
-    .eq("wallet_id", wallet.id)
-    .eq("booking_id", booking.id)
-    .eq("category", "booking_earning")
-    .maybeSingle();
-
-  if (!earning) {
-    await creditBookingEarning(supabase, booking, commissionRate);
-    return;
-  }
-
-  const row = earning as WalletTxnRow;
-  if (row.is_released) return;
-
-  const net = Number(row.amount);
-
-  await supabase
-    .from("practitioner_wallet_transactions")
-    .update({ is_released: true })
-    .eq("id", row.id);
-
-  await supabase.from("practitioner_wallet_transactions").insert({
-    wallet_id: wallet.id,
-    booking_id: booking.id,
-    type: "credit",
-    category: "earning_release",
-    amount: net,
-    description: `Released — ${booking.booking_number}`,
-    is_released: true,
+  const { data: earning } = await supabase.from("practitioner_wallet_transactions").select("id")
+    .eq("wallet_id", wallet.id).eq("booking_id", booking.id).eq("category", "booking_earning").maybeSingle();
+  if (!earning) await creditBookingEarning(supabase, booking, commissionRate);
+  const { data, error } = await supabase.rpc("release_wallet_earning", {
+    p_wallet_type: "practitioner", p_wallet_id: wallet.id, p_order_or_booking_id: booking.id,
+    p_description: `Released — ${booking.booking_number}`,
   });
-
-  const { data: fresh } = await supabase
-    .from("practitioner_wallets")
-    .select("*")
-    .eq("id", wallet.id)
-    .single();
-
-  if (!fresh) return;
-
-  const w = fresh as WalletRow;
-  await updateWallet(supabase, w.id, {
-    held_balance: Math.max(0, Number(w.held_balance) - net),
-    available_balance: Number(w.available_balance) + net,
-  });
+  if (error) throw new Error(`Practitioner earning release failed: ${error.message}`);
+  const result = data as { ok?: boolean; error?: string } | null;
+  if (!result?.ok) throw new Error(result?.error ?? "Practitioner earning release failed");
 }
 
 export async function reverseBookingEarning(
-  supabase: SupabaseClient,
-  booking: BookingRow,
-  commissionRate: number
+  supabase: SupabaseClient, booking: BookingRow, commissionRate: number
 ): Promise<void> {
   if (!booking.practitioner_id) return;
-
-  const wallet = await getOrCreatePractitionerWallet(
-    supabase,
-    booking.practitioner_id,
-    commissionRate
-  );
+  const wallet = await getOrCreatePractitionerWallet(supabase, booking.practitioner_id, commissionRate);
   if (!wallet) return;
-
-  const { data: earning } = await supabase
-    .from("practitioner_wallet_transactions")
-    .select("*")
-    .eq("wallet_id", wallet.id)
-    .eq("booking_id", booking.id)
-    .eq("category", "booking_earning")
-    .maybeSingle();
-
-  if (!earning) return;
-
-  const row = earning as WalletTxnRow;
-  const net = Number(row.amount);
-
-  if (await hasTxn(supabase, wallet.id, booking.id, "refund")) return;
-
-  await supabase.from("practitioner_wallet_transactions").insert({
-    wallet_id: wallet.id,
-    booking_id: booking.id,
-    type: "debit",
-    category: "refund",
-    amount: net,
-    description: `Reversal — ${booking.booking_number}`,
-    is_released: true,
+  const { data, error } = await supabase.rpc("reverse_wallet_earning", {
+    p_wallet_type: "practitioner", p_wallet_id: wallet.id, p_order_or_booking_id: booking.id,
+    p_description: `Reversal — ${booking.booking_number}`,
   });
+  if (error) throw new Error(`Practitioner earning reversal failed: ${error.message}`);
+  const result = data as { ok?: boolean; error?: string } | null;
+  if (!result?.ok) throw new Error(result?.error ?? "Practitioner earning reversal failed");
+}
 
-  const { data: fresh } = await supabase
-    .from("practitioner_wallets")
-    .select("*")
-    .eq("id", wallet.id)
-    .single();
+/**
+ * Apply a proportional practitioner wallet reversal through a database RPC.
+ * The SQL function locks the wallet and applies the ledger row + balance update
+ * in one transaction, so retries cannot leave an inserted ledger entry without
+ * its corresponding wallet adjustment.
+ */
+export async function reverseBookingEarningForRefund(
+  supabase: SupabaseClient,
+  booking: BookingRow,
+  refundRequestId: string,
+  refundAmountInr: number,
+  customerTotalPaidInr: number,
+  _commissionRate: number
+): Promise<{ reversedAmount: number; error?: string }> {
+  if (!booking.practitioner_id) return { reversedAmount: 0 };
 
-  if (!fresh) return;
-
-  const w = fresh as WalletRow;
-  const patch: Partial<WalletRow> = {
-    total_earned: Math.max(0, Number(w.total_earned) - net),
-  };
-
-  if (row.is_released) {
-    patch.available_balance = Math.max(0, Number(w.available_balance) - net);
-  } else {
-    patch.held_balance = Math.max(0, Number(w.held_balance) - net);
+  const refundAmount = Math.round(Number(refundAmountInr) * 100) / 100;
+  const customerTotalPaid = Math.round(Number(customerTotalPaidInr) * 100) / 100;
+  if (!Number.isFinite(refundAmount) || refundAmount <= 0 || customerTotalPaid <= 0) {
+    return { reversedAmount: 0, error: "Invalid refund or booking amount" };
+  }
+  if (refundAmount > customerTotalPaid) {
+    return { reversedAmount: 0, error: "Refund exceeds customer payment" };
   }
 
-  await updateWallet(supabase, w.id, patch);
+  const { data, error } = await supabase.rpc("apply_practitioner_booking_refund", {
+    p_refund_request_id: refundRequestId,
+    p_booking_id: booking.id,
+    p_refund_amount_inr: refundAmount,
+    p_customer_total_paid_inr: customerTotalPaid,
+  });
+
+  if (error) return { reversedAmount: 0, error: error.message };
+
+  const result = data as {
+    ok?: boolean;
+    error?: string;
+    reversed_amount?: number | string;
+  } | null;
+
+  if (!result?.ok) {
+    return { reversedAmount: 0, error: result?.error ?? "Wallet refund reversal failed" };
+  }
+
+  return { reversedAmount: Number(result.reversed_amount ?? 0) };
 }
 
 export async function syncPractitionerWalletFromBookings(
@@ -282,10 +213,13 @@ export async function syncPractitionerWalletFromBookings(
     .eq("practitioner_id", practitionerId);
 
   for (const row of (bookings ?? []) as BookingRow[]) {
-    if (row.payment_status === "Refunded" || row.booking_status === "Cancelled") {
+    if (row.payment_status === "Refunded") {
       await reverseBookingEarning(supabase, row, commissionRate);
       continue;
     }
+    // A cancelled booking can have a partial or zero refund. Its refund ledger
+    // entries are authoritative; do not reverse the entire earning here.
+    if (row.booking_status === "Cancelled") continue;
     if (row.payment_status === "Paid" && isVerifiedBookingPaymentId(row.razorpay_payment_id)) {
       await creditBookingEarning(supabase, row, commissionRate);
       if (row.booking_status === "Completed") {
@@ -322,80 +256,30 @@ export async function requestPractitionerPayout(
   amount: number,
   commissionRate: number
 ): Promise<{ payoutId?: string; error?: string }> {
-  const wallet = await getOrCreatePractitionerWallet(
-    supabase,
-    practitionerId,
-    commissionRate
-  );
+  const wallet = await getOrCreatePractitionerWallet(supabase, practitionerId, commissionRate);
   if (!wallet) return { error: "Wallet not found" };
 
-  const { data: walletRow } = await supabase
+  const { data: walletRow, error: walletError } = await supabase
     .from("practitioner_wallets")
     .select("bank_account_label")
     .eq("id", wallet.id)
     .maybeSingle();
-
+  if (walletError) return { error: walletError.message };
   if (!isBankAccountLinkedForPayout((walletRow as { bank_account_label?: string | null } | null)?.bank_account_label)) {
     return { error: "Bank account details required before requesting a withdrawal" };
   }
+  if (!Number.isFinite(amount) || amount <= 0) return { error: "Invalid amount" };
 
-  if (amount <= 0) return { error: "Invalid amount" };
-
-  const { data: reservedWallet, error: reserveError } = await supabase
-    .from("practitioner_wallets")
-    .update({
-      available_balance: Number(wallet.available_balance) - amount,
-      pending_payout: Number(wallet.pending_payout) + amount,
-    })
-    .eq("id", wallet.id)
-    .gte("available_balance", amount)
-    .select()
-    .maybeSingle();
-
-  if (reserveError) return { error: reserveError.message };
-  if (!reservedWallet) return { error: "Insufficient available balance" };
-
-  const { data: payout, error: payoutError } = await supabase
-    .from("practitioner_payouts")
-    .insert({
-      wallet_id: wallet.id,
-      amount,
-      status: "Pending",
-      notes: "Manual withdrawal — processed by Nature's Grace team within 3–7 business days",
-    })
-    .select()
-    .single();
-
-  if (payoutError || !payout) {
-    await updateWallet(supabase, wallet.id, {
-      available_balance: Number(reservedWallet.available_balance) + amount,
-      pending_payout: Math.max(0, Number(reservedWallet.pending_payout) - amount),
-    });
-    return { error: payoutError?.message ?? "Could not create payout" };
-  }
-
-  const { error: txnError } = await supabase
-    .from("practitioner_wallet_transactions")
-    .insert({
-      wallet_id: wallet.id,
-      payout_id: payout.id,
-      type: "debit",
-      category: "payout",
-      amount,
-      description: "Payout to Bank Account (pending)",
-      is_released: true,
-    });
-
-  if (txnError) {
-    await supabase.from("practitioner_payouts").delete().eq("id", payout.id);
-    await updateWallet(supabase, wallet.id, {
-      available_balance: Number(reservedWallet.available_balance) + amount,
-      pending_payout: Math.max(0, Number(reservedWallet.pending_payout) - amount),
-    });
-    return { error: txnError.message };
-  }
-
-  return { payoutId: payout.id as string };
+  const { data, error } = await supabase.rpc("request_wallet_payout", {
+    p_payout_type: "practitioner",
+    p_wallet_id: wallet.id,
+    p_amount: Math.round(amount * 100) / 100,
+    p_notes: "Manual withdrawal — processed by Nature's Grace team within 3–7 business days",
+  });
+  if (error) return { error: error.message };
+  const result = data as { ok?: boolean; error?: string; payout_id?: string } | null;
+  if (!result?.ok || !result.payout_id) return { error: result?.error ?? "Could not create payout" };
+  return { payoutId: result.payout_id };
 }
 
 export async function verifyPractitionerPayoutOwnership(
@@ -461,6 +345,9 @@ export async function createPaidBooking(
     sessionTime: string;
     durationMinutes: number;
     amount: number;
+    platformFeeInr?: number;
+    platformGstInr?: number;
+    totalPaidAmountInr?: number;
     razorpayPaymentId: string;
     notes?: string;
   }
@@ -487,6 +374,9 @@ export async function createPaidBooking(
       session_time: input.sessionTime,
       duration_minutes: input.durationMinutes,
       amount: input.amount,
+      platform_fee_inr: input.platformFeeInr ?? 0,
+      platform_gst_inr: input.platformGstInr ?? 0,
+      total_paid_amount_inr: input.totalPaidAmountInr ?? input.amount,
       booking_status: "Confirmed",
       payment_status: "Paid",
       razorpay_payment_id: input.razorpayPaymentId,
