@@ -120,5 +120,55 @@ export async function handlePaymentCaptured(payload: {
     }
   }
 
+  const { data: eventRegistration } = await supabase
+    .from("event_registrations")
+    .select("id, payment_status, checkout_amount, razorpay_payment_id")
+    .eq("razorpay_order_id", razorpayOrderId)
+    .maybeSingle();
+
+  if (
+    eventRegistration &&
+    entity.currency === "INR" &&
+    Number.isFinite(Number(eventRegistration.checkout_amount)) &&
+    Number(entity.amount) === Math.round(Number(eventRegistration.checkout_amount) * 100)
+  ) {
+    if (
+      eventRegistration.payment_status === "Paid" &&
+      eventRegistration.razorpay_payment_id === paymentId
+    ) {
+      return { matched: true, type: "event_registration", id: eventRegistration.id };
+    }
+
+    if (eventRegistration.payment_status === "Pending") {
+      const { data: updated, error: updateError } = await supabase
+        .from("event_registrations")
+        .update({
+          payment_status: "Paid",
+          razorpay_payment_id: paymentId,
+          amount_paid: Number(eventRegistration.checkout_amount),
+        })
+        .eq("id", eventRegistration.id)
+        .eq("payment_status", "Pending")
+        .select("id")
+        .maybeSingle();
+
+      if (!updateError && updated) {
+        return { matched: true, type: "event_registration", id: eventRegistration.id };
+      }
+
+      const { data: current } = await supabase
+        .from("event_registrations")
+        .select("payment_status, razorpay_payment_id")
+        .eq("id", eventRegistration.id)
+        .maybeSingle();
+      if (
+        current?.payment_status === "Paid" &&
+        current.razorpay_payment_id === paymentId
+      ) {
+        return { matched: true, type: "event_registration", id: eventRegistration.id };
+      }
+    }
+  }
+
   return { matched: false };
 }
