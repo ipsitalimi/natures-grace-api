@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { dispatchUserNotification } from "./notificationDispatch";
 import { fetchCommissionRate } from "./platformSettings";
+import { ensureBookingMeetLink } from "./googleMeet";
 
 export type BookingDraft = {
   practitionerId: string;
@@ -78,6 +79,11 @@ export async function fulfillBookingPayment(params: {
   if (!result?.ok || !result.booking_id || !result.booking_number) {
     return { ok: false, error: result?.error ?? "Booking fulfillment failed" };
   }
+
+  // Meet creation happens only after the database confirms payment and booking fulfillment.
+  // Failures are recorded for retry and must never undo a paid booking.
+  await ensureBookingMeetLink(supabase, result.booking_id);
+
 
   // Notifications are intentionally outside the transaction. A notification
   // failure must not roll back or duplicate a paid booking/wallet entry.
