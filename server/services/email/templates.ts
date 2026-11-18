@@ -31,6 +31,15 @@ export interface EmailPayload {
 const BRAND = "Nature's Grace";
 
 function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(new RegExp(String.fromCharCode(39), "g"), "&#39;");
+}
+
+function escapeHtml(value: string): string {
   return value.replace(/[&<>\"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[character] ?? character);
 }
 
@@ -47,7 +56,9 @@ export function buildEmail(
   to: string,
   vars: Record<string, string>
 ): EmailPayload {
-  const name = vars.name || "there";
+  // Escape all user/database-supplied values before HTML interpolation.
+  const safeVars = Object.fromEntries(Object.entries(vars).map(([key, value]) => [key, escapeHtml(value)]));
+  const name = safeVars.name || "there";
   const templates: Record<EmailTemplateId, { subject: string; body: string }> = {
     account_created: {
       subject: `Welcome to ${BRAND}`,
@@ -67,15 +78,15 @@ export function buildEmail(
     },
     booking_confirmed: {
       subject: "Session booking confirmed",
-      body: `<p>Hi ${escapeHtml(name)},</p><p>Your Nature&#39;s Grace session is confirmed.</p><p><strong>Booking:</strong> ${escapeHtml(vars.bookingNumber ?? "")}<br/><strong>Customer:</strong> ${escapeHtml(vars.customer ?? "")}<br/><strong>Practitioner:</strong> ${escapeHtml(vars.practitioner ?? "")}<br/><strong>Service:</strong> ${escapeHtml(vars.service ?? "")}<br/><strong>Date:</strong> ${escapeHtml(vars.date ?? "")}<br/><strong>Time:</strong> ${escapeHtml(vars.time ?? "")} (IST)<br/><strong>Duration:</strong> ${escapeHtml(vars.duration ?? "")} minutes</p><p><strong>Session amount:</strong> ${escapeHtml(vars.serviceAmount ?? "")}<br/><strong>Platform fee:</strong> ${escapeHtml(vars.platformFee ?? "")}<br/><strong>GST:</strong> ${escapeHtml(vars.platformGst ?? "")}<br/><strong>Total paid:</strong> ${escapeHtml(vars.totalPaid ?? "")}<br/><strong>Payment reference:</strong> ${escapeHtml(vars.paymentId ?? "")}</p>${vars.meetingLink ? `<p><a href="${escapeHtml(vars.meetingLink)}">Join Google Meet</a></p><p>${escapeHtml(vars.meetingLink)}</p>` : `<p>Your Meet link is being prepared. Check your booking in the app before the session.</p>`}`,
+      body: `<p>Hi ${escapeHtml(name)},</p><p>Your Nature&#39;s Grace session is confirmed.</p><p><strong>Booking:</strong> ${escapeHtml(safeVars.bookingNumber ?? "")}<br/><strong>Customer:</strong> ${escapeHtml(safeVars.customer ?? "")}<br/><strong>Practitioner:</strong> ${escapeHtml(safeVars.practitioner ?? "")}<br/><strong>Service:</strong> ${escapeHtml(safeVars.service ?? "")}<br/><strong>Date:</strong> ${escapeHtml(safeVars.date ?? "")}<br/><strong>Time:</strong> ${escapeHtml(safeVars.time ?? "")} (IST)<br/><strong>Duration:</strong> ${escapeHtml(safeVars.duration ?? "")} minutes</p><p><strong>Session amount:</strong> ${escapeHtml(safeVars.serviceAmount ?? "")}<br/><strong>Platform fee:</strong> ${escapeHtml(safeVars.platformFee ?? "")}<br/><strong>GST:</strong> ${escapeHtml(safeVars.platformGst ?? "")}<br/><strong>Total paid:</strong> ${escapeHtml(safeVars.totalPaid ?? "")}<br/><strong>Payment reference:</strong> ${escapeHtml(safeVars.paymentId ?? "")}</p>${safeVars.meetingLink ? `<p><a href="${escapeHtml(safeVars.meetingLink)}">Join Google Meet</a></p><p>${escapeHtml(safeVars.meetingLink)}</p>` : `<p>Your Meet link is being prepared. Check your booking in the app before the session.</p>`}`,
     },
     booking_cancelled: {
       subject: "Session booking cancelled",
-      body: `<p>Hi ${name},</p><p>Your session scheduled for ${vars.date ?? ""} at ${vars.time ?? ""} has been cancelled.</p><p>${vars.refundNote ?? "Refund eligibility depends on our cancellation policy."}</p>`,
+      body: `<p>Hi ${name},</p><p>Your session scheduled for ${safeVars.date ?? ""} at ${safeVars.time ?? ""} has been cancelled.</p><p>${safeVars.refundNote ?? "Refund eligibility depends on our cancellation policy."}</p>`,
     },
     booking_reminder: {
       subject: "Reminder: upcoming session",
-      body: `<p>Hi ${name},</p><p>This is a reminder for your session with <strong>${vars.practitioner ?? ""}</strong> on ${vars.date ?? ""} at ${vars.time ?? ""}.</p>`,
+      body: `<p>Hi ${name},</p><p>This is a reminder for your session with <strong>${safeVars.practitioner ?? ""}</strong> on ${safeVars.date ?? ""} at ${safeVars.time ?? ""}.</p>`,
     },
     practitioner_application_submitted: {
       subject: "Practitioner application received",
@@ -87,7 +98,7 @@ export function buildEmail(
     },
     practitioner_rejected: {
       subject: "Practitioner application update",
-      body: `<p>Hi ${name},</p><p>Thank you for applying. We were unable to approve your application at this time.</p><p><strong>Reason:</strong> ${vars.reason ?? "Please contact support for details."}</p><p>You may reapply with updated information from the app.</p>`,
+      body: `<p>Hi ${name},</p><p>Thank you for applying. We were unable to approve your application at this time.</p><p><strong>Reason:</strong> ${safeVars.reason ?? "Please contact support for details."}</p><p>You may reapply with updated information from the app.</p>`,
     },
     seller_application_submitted: {
       subject: "Seller application received",
@@ -99,35 +110,35 @@ export function buildEmail(
     },
     seller_rejected: {
       subject: "Seller application update",
-      body: `<p>Hi ${name},</p><p>We were unable to approve your seller application at this time.</p><p><strong>Reason:</strong> ${vars.reason ?? "Please contact support for details."}</p><p>You may reapply with updated information from the app.</p>`,
+      body: `<p>Hi ${name},</p><p>We were unable to approve your seller application at this time.</p><p><strong>Reason:</strong> ${safeVars.reason ?? "Please contact support for details."}</p><p>You may reapply with updated information from the app.</p>`,
     },
     order_confirmed: {
-      subject: `Order ${vars.orderNumber ?? ""} confirmed`,
-      body: `<p>Hi ${name},</p><p>Thank you for your order <strong>${vars.orderNumber ?? ""}</strong>.</p><p><strong>Total:</strong> ${vars.total ?? ""}</p><p>We'll notify you when your order ships.</p>`,
+      subject: `Order ${safeVars.orderNumber ?? ""} confirmed`,
+      body: `<p>Hi ${name},</p><p>Thank you for your order <strong>${safeVars.orderNumber ?? ""}</strong>.</p><p><strong>Total:</strong> ${safeVars.total ?? ""}</p><p>We'll notify you when your order ships.</p>`,
     },
     order_cancelled: {
-      subject: `Order ${vars.orderNumber ?? ""} cancelled`,
-      body: `<p>Hi ${name},</p><p>Your order <strong>${vars.orderNumber ?? ""}</strong> has been cancelled.</p><p>${vars.refundNote ?? ""}</p>`,
+      subject: `Order ${safeVars.orderNumber ?? ""} cancelled`,
+      body: `<p>Hi ${name},</p><p>Your order <strong>${safeVars.orderNumber ?? ""}</strong> has been cancelled.</p><p>${safeVars.refundNote ?? ""}</p>`,
     },
     order_shipped: {
-      subject: `Order ${vars.orderNumber ?? ""} shipped`,
-      body: `<p>Hi ${name},</p><p>Your order has been shipped.</p><p><strong>Courier:</strong> ${vars.courier ?? "—"}<br/><strong>Tracking:</strong> ${vars.tracking ?? "—"}</p>`,
+      subject: `Order ${safeVars.orderNumber ?? ""} shipped`,
+      body: `<p>Hi ${name},</p><p>Your order has been shipped.</p><p><strong>Courier:</strong> ${safeVars.courier ?? "—"}<br/><strong>Tracking:</strong> ${safeVars.tracking ?? "—"}</p>`,
     },
     order_delivered: {
-      subject: `Order ${vars.orderNumber ?? ""} delivered`,
-      body: `<p>Hi ${name},</p><p>Your order <strong>${vars.orderNumber ?? ""}</strong> has been delivered. We hope you enjoy your purchase.</p>`,
+      subject: `Order ${safeVars.orderNumber ?? ""} delivered`,
+      body: `<p>Hi ${name},</p><p>Your order <strong>${safeVars.orderNumber ?? ""}</strong> has been delivered. We hope you enjoy your purchase.</p>`,
     },
     refund_approved: {
       subject: "Refund approved",
-      body: `<p>Hi ${name},</p><p>Your refund request has been approved.</p><p><strong>Amount:</strong> ${vars.amount ?? ""}<br/><strong>Reference:</strong> ${vars.reference ?? ""}</p><p>Funds may take 5–10 business days to appear depending on your bank.</p>`,
+      body: `<p>Hi ${name},</p><p>Your refund request has been approved.</p><p><strong>Amount:</strong> ${safeVars.amount ?? ""}<br/><strong>Reference:</strong> ${safeVars.reference ?? ""}</p><p>Funds may take 5–10 business days to appear depending on your bank.</p>`,
     },
     withdrawal_received: {
       subject: "Withdrawal request received",
-      body: `<p>Hi ${name},</p><p>We received your withdrawal request for <strong>${vars.amount ?? ""}</strong>.</p><p>Requests are processed manually by our team within 3–7 business days.</p>`,
+      body: `<p>Hi ${name},</p><p>We received your withdrawal request for <strong>${safeVars.amount ?? ""}</strong>.</p><p>Requests are processed manually by our team within 3–7 business days.</p>`,
     },
     withdrawal_completed: {
       subject: "Withdrawal completed",
-      body: `<p>Hi ${name},</p><p>Your withdrawal of <strong>${vars.amount ?? ""}</strong> has been processed and sent to your registered bank account.</p>`,
+      body: `<p>Hi ${name},</p><p>Your withdrawal of <strong>${safeVars.amount ?? ""}</strong> has been processed and sent to your registered bank account.</p>`,
     },
     account_deletion_requested: {
       subject: "Account deletion request received",
