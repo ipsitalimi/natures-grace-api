@@ -21,7 +21,7 @@ export async function sendEventRegistrationReceipts(
 
   const [{ data: event, error: eventError }, { data: admins }] = await Promise.all([
     supabase.from("events").select("*").eq("id", registration.event_id).maybeSingle(),
-    supabase.from("profiles").select("email, full_name").eq("role", "admin"),
+    supabase.from("profiles").select("email, full_name").in("role", ["Admin", "admin"]),
   ]);
   if (eventError || !event) {
     console.error("[eventFulfillment] event lookup failed", eventError?.message);
