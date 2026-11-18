@@ -215,6 +215,9 @@ async function handleConfirmPayment(req: Request, res: Response) {
 
     if (!created.ok) return res.status(500).json({ error: created.error });
 
+    // Booking and wallet are committed; Meet creation is best-effort and cannot undo payment.
+    await ensureBookingMeetLink(supabase, created.bookingId);
+
     return res.json({
       paymentId: verified.paymentId,
       orderId: verified.orderId,
