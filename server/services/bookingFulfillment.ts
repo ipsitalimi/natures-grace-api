@@ -103,6 +103,7 @@ export async function fulfillBookingPayment(params: {
             time: draft.sessionTime,
             service: draft.serviceName,
           },
+          suppressEmail: true,
         });
       } catch (notificationError) {
         console.error("[bookingFulfillment] booking notification failed");
