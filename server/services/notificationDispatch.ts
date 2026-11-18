@@ -97,6 +97,7 @@ export async function dispatchUserNotification(
     linkTargetId?: string | null;
     emailVars?: Record<string, string>;
     emailTemplateOverride?: EmailTemplateId;
+    suppressEmail?: boolean;
   }
 ): Promise<void> {
   const { data: profile } = await supabase
@@ -119,7 +120,7 @@ export async function dispatchUserNotification(
 
   const emailTemplate =
     params.emailTemplateOverride ?? EVENT_EMAIL[params.event];
-  if (emailTemplate && categoryAllowed(prefs, category)) {
+  if (emailTemplate && !params.suppressEmail && categoryAllowed(prefs, category)) {
     await sendEmailToUserId(supabase, params.userId, emailTemplate, params.emailVars ?? {});
   }
 
