@@ -30,6 +30,10 @@ export interface EmailPayload {
 
 const BRAND = "Nature's Grace";
 
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>\"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[character] ?? character);
+}
+
 function wrap(body: string): string {
   return `<!DOCTYPE html><html><body style="font-family:Georgia,serif;color:#1a1a1a;line-height:1.6;max-width:560px;margin:0 auto;padding:24px;">
 <p style="color:#013220;font-weight:bold;font-size:18px;">${BRAND}</p>
@@ -63,7 +67,7 @@ export function buildEmail(
     },
     booking_confirmed: {
       subject: "Session booking confirmed",
-      body: `<p>Hi ${name},</p><p>Your Nature&#39;s Grace session is confirmed.</p><p><strong>Booking:</strong> ${vars.bookingNumber ?? ""}<br/><strong>Customer:</strong> ${vars.customer ?? ""}<br/><strong>Practitioner:</strong> ${vars.practitioner ?? ""}<br/><strong>Service:</strong> ${vars.service ?? ""}<br/><strong>Date:</strong> ${vars.date ?? ""}<br/><strong>Time:</strong> ${vars.time ?? ""} (IST)<br/><strong>Duration:</strong> ${vars.duration ?? ""} minutes</p><p><strong>Session amount:</strong> ${vars.serviceAmount ?? ""}<br/><strong>Platform fee:</strong> ${vars.platformFee ?? ""}<br/><strong>GST:</strong> ${vars.platformGst ?? ""}<br/><strong>Total paid:</strong> ${vars.totalPaid ?? ""}<br/><strong>Payment reference:</strong> ${vars.paymentId ?? ""}</p>${vars.meetingLink ? `<p><a href="${vars.meetingLink}">Join Google Meet</a></p><p>${vars.meetingLink}</p>` : `<p>Your Meet link is being prepared. Check your booking in the app before the session.</p>`}`,
+      body: `<p>Hi ${escapeHtml(name)},</p><p>Your Nature&#39;s Grace session is confirmed.</p><p><strong>Booking:</strong> ${escapeHtml(vars.bookingNumber ?? "")}<br/><strong>Customer:</strong> ${escapeHtml(vars.customer ?? "")}<br/><strong>Practitioner:</strong> ${escapeHtml(vars.practitioner ?? "")}<br/><strong>Service:</strong> ${escapeHtml(vars.service ?? "")}<br/><strong>Date:</strong> ${escapeHtml(vars.date ?? "")}<br/><strong>Time:</strong> ${escapeHtml(vars.time ?? "")} (IST)<br/><strong>Duration:</strong> ${escapeHtml(vars.duration ?? "")} minutes</p><p><strong>Session amount:</strong> ${escapeHtml(vars.serviceAmount ?? "")}<br/><strong>Platform fee:</strong> ${escapeHtml(vars.platformFee ?? "")}<br/><strong>GST:</strong> ${escapeHtml(vars.platformGst ?? "")}<br/><strong>Total paid:</strong> ${escapeHtml(vars.totalPaid ?? "")}<br/><strong>Payment reference:</strong> ${escapeHtml(vars.paymentId ?? "")}</p>${vars.meetingLink ? `<p><a href="${escapeHtml(vars.meetingLink)}">Join Google Meet</a></p><p>${escapeHtml(vars.meetingLink)}</p>` : `<p>Your Meet link is being prepared. Check your booking in the app before the session.</p>`}`,
     },
     booking_cancelled: {
       subject: "Session booking cancelled",
