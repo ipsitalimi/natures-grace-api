@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { requireSupabaseAdmin } from "../lib/supabaseAdmin";
 import { requireBearerUser } from "../middleware/auth";
+import { sendEventRegistrationReceipts } from "../services/eventFulfillment";
 import {
   confirmBookingPayment,
   createBookingOrder,
@@ -152,6 +153,7 @@ async function handleConfirmEventPayment(req: Request, res: Response) {
     }
     if (registration.payment_status === "Paid") {
       if (registration.razorpay_payment_id === paymentId) {
+        await sendEventRegistrationReceipts(supabase, { registrationId: registration.id });
         return res.json({ paymentId, orderId, registrationId: registration.id });
       }
       return res.status(409).json({ error: "This event registration has already been paid." });
@@ -194,6 +196,7 @@ async function handleConfirmEventPayment(req: Request, res: Response) {
       }
     }
 
+    await sendEventRegistrationReceipts(supabase, { registrationId: registration.id });
     return res.json({ paymentId: verified.paymentId, orderId, registrationId: registration.id });
   } catch (err) {
     console.error("[eventCheckout] confirmation failed", err);
@@ -201,7 +204,85 @@ async function handleConfirmEventPayment(req: Request, res: Response) {
   }
 }
 
+
+async function handleFreeEventRegistration(req: Request, res: Response) {
+  try {
+    const user = await requireBearerUser(req, res);
+    if (!user) return;
+
+    const body = req.body as {
+      eventId?: string;
+      attendeeName?: string;
+      attendeeEmail?: string;
+      attendeePhone?: string;
+      message?: string;
+    };
+    if (!body.eventId || !body.attendeeName?.trim() || !body.attendeeEmail?.trim() || !body.attendeePhone?.trim()) {
+      return res.status(400).json({ error: "eventId, attendeeName, attendeeEmail, and attendeePhone are required" });
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.attendeeEmail.trim())) {
+      return res.status(400).json({ error: "Enter a valid attendee email address" });
+    }
+
+    const supabase = requireSupabaseAdmin();
+    const { data: event, error: eventError } = await supabase
+      .from("events")
+      .select("id, title, price_label, status, is_visible")
+      .eq("id", body.eventId)
+      .maybeSingle();
+    if (eventError || !event) return res.status(404).json({ error: "Event not found" });
+    if (event.status !== "Active" || event.is_visible !== true) {
+      return res.status(409).json({ error: "This event is not accepting registrations" });
+    }
+    const amountInr = parseEventPrice(event.price_label);
+    if (amountInr === null) return res.status(400).json({ error: "Event price is invalid. Ask the admin to update it." });
+    if (amountInr > 0) return res.status(400).json({ error: "This is a paid event. Use Razorpay checkout." });
+
+    const { data: existing, error: existingError } = await supabase
+      .from("event_registrations")
+      .select("id, payment_status")
+      .eq("event_id", body.eventId)
+      .eq("user_id", user.id)
+      .eq("status", "Registered")
+      .maybeSingle();
+    if (existingError) return res.status(500).json({ error: existingError.message });
+    if (existing) {
+      if (existing.payment_status !== "Pending") {
+        await sendEventRegistrationReceipts(supabase, { registrationId: existing.id });
+        return res.json({ registrationId: existing.id, alreadyRegistered: true });
+      }
+      return res.status(409).json({ error: "A payment for this event is still pending." });
+    }
+
+    const { data: registration, error: insertError } = await supabase
+      .from("event_registrations")
+      .insert({
+        event_id: body.eventId,
+        user_id: user.id,
+        attendee_name: body.attendeeName.trim().slice(0, 160),
+        attendee_email: body.attendeeEmail.trim().slice(0, 254),
+        attendee_phone: body.attendeePhone.trim().slice(0, 40),
+        message: body.message?.trim().slice(0, 2000) ?? "",
+        status: "Registered",
+        payment_status: "None",
+      })
+      .select("id")
+      .single();
+    if (insertError || !registration) {
+      if (insertError?.code === "23505") return res.status(409).json({ error: "You are already registered for this event." });
+      return res.status(500).json({ error: insertError?.message ?? "Could not save event registration" });
+    }
+
+    await sendEventRegistrationReceipts(supabase, { registrationId: registration.id });
+    return res.status(201).json({ registrationId: registration.id });
+  } catch (err) {
+    console.error("[eventCheckout] free registration failed", err);
+    return res.status(500).json({ error: err instanceof Error ? err.message : "Could not register for event" });
+  }
+}
+
 export function registerEventCheckoutRoutes(app: Express) {
+  app.post("/api/events/register-free", handleFreeEventRegistration);
   app.post("/api/events/checkout/create-order", handleCreateEventOrder);
   app.post("/api/events/checkout/confirm", handleConfirmEventPayment);
 }
