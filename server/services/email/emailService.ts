@@ -11,7 +11,8 @@ export type SendEmailResult = { ok: true; skipped?: boolean } | { ok: false; err
 export async function sendTransactionalEmail(
   templateId: EmailTemplateId,
   to: string,
-  vars: Record<string, string> = {}
+  vars: Record<string, string> = {},
+  idempotencyKey?: string
 ): Promise<SendEmailResult> {
   if (!to?.trim()) {
     return { ok: false, error: "Missing recipient email" };
@@ -27,7 +28,7 @@ export async function sendTransactionalEmail(
 
   try {
     if (provider === "resend") {
-      return await sendViaResend(payload);
+      return await sendViaResend(payload, idempotencyKey);
     }
     if (provider === "smtp") {
       return await sendViaSmtp(payload);
@@ -45,7 +46,7 @@ async function sendViaResend(payload: {
   subject: string;
   html: string;
   text: string;
-}): Promise<SendEmailResult> {
+}, idempotencyKey?: string): Promise<SendEmailResult> {
   const apiKey = process.env.RESEND_API_KEY;
   const from = process.env.EMAIL_FROM ?? "Nature's Grace <noreply@naturesgrace.app>";
   if (!apiKey) return { ok: false, error: "RESEND_API_KEY not set" };
@@ -55,6 +56,7 @@ async function sendViaResend(payload: {
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
     },
     body: JSON.stringify({
       from,
