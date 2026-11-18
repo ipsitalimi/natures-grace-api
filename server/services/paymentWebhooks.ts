@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAdmin } from "../lib/supabaseAdmin";
 import { fulfillStoreOrderPayment } from "./orderFulfillment";
-import { fulfillBookingPayment } from "./bookingFulfillment";
+import { fulfillBookingPayment, sendPaidBookingReceipts } from "./bookingFulfillment";
 
 export function verifyPaymentWebhookSignature(
   rawBody: Buffer | string,
@@ -116,6 +116,7 @@ export async function handlePaymentCaptured(payload: {
       booking: pending.booking_draft as Parameters<typeof fulfillBookingPayment>[0]["booking"],
     });
     if (result.ok) {
+      await sendPaidBookingReceipts(supabase, result.bookingId, paymentId);
       return { matched: true, type: "booking", id: result.bookingId };
     }
   }
