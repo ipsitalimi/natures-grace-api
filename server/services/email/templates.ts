@@ -4,6 +4,7 @@ export type EmailTemplateId =
   | "password_changed"
   | "password_reset_requested"
   | "booking_confirmed"
+  | "event_registration_confirmed"
   | "booking_cancelled"
   | "booking_reminder"
   | "practitioner_application_submitted"
@@ -70,6 +71,10 @@ export function buildEmail(
     booking_confirmed: {
       subject: "Session booking confirmed",
       body: `<p>Hi ${escapeHtml(name)},</p><p>Your Nature&#39;s Grace session is confirmed.</p><p><strong>Booking:</strong> ${escapeHtml(safeVars.bookingNumber ?? "")}<br/><strong>Customer:</strong> ${escapeHtml(safeVars.customer ?? "")}<br/><strong>Practitioner:</strong> ${escapeHtml(safeVars.practitioner ?? "")}<br/><strong>Service:</strong> ${escapeHtml(safeVars.service ?? "")}<br/><strong>Date:</strong> ${escapeHtml(safeVars.date ?? "")}<br/><strong>Time:</strong> ${escapeHtml(safeVars.time ?? "")} (IST)<br/><strong>Duration:</strong> ${escapeHtml(safeVars.duration ?? "")} minutes</p><p><strong>Session amount:</strong> ${escapeHtml(safeVars.serviceAmount ?? "")}<br/><strong>Platform fee:</strong> ${escapeHtml(safeVars.platformFee ?? "")}<br/><strong>GST:</strong> ${escapeHtml(safeVars.platformGst ?? "")}<br/><strong>Total paid:</strong> ${escapeHtml(safeVars.totalPaid ?? "")}<br/><strong>Payment reference:</strong> ${escapeHtml(safeVars.paymentId ?? "")}</p>${safeVars.meetingLink ? `<p><a href="${escapeHtml(safeVars.meetingLink)}">Join Google Meet</a></p><p>${escapeHtml(safeVars.meetingLink)}</p>` : `<p>Your Meet link is being prepared. Check your booking in the app before the session.</p>`}`,
+    },
+    event_registration_confirmed: {
+      subject: `Community event registration confirmed: ${safeVars.eventTitle ?? "Event"}`,
+      body: `<p>Hi ${name},</p><p>Your registration for the Nature&#39;s Grace community event is confirmed.</p><p><strong>Event:</strong> ${safeVars.eventTitle ?? ""}<br/><strong>Date:</strong> ${safeVars.eventDate ?? ""}<br/><strong>Time:</strong> ${safeVars.eventTime ?? ""} (IST)<br/><strong>Location:</strong> ${safeVars.eventLocation ?? ""}</p>${safeVars.eventDescription ? `<p>${safeVars.eventDescription}</p>` : ""}<p><strong>Attendee:</strong> ${safeVars.attendeeName ?? ""}<br/><strong>Email:</strong> ${safeVars.attendeeEmail ?? ""}<br/><strong>Phone:</strong> ${safeVars.attendeePhone ?? ""}<br/><strong>Registration ID:</strong> ${safeVars.registrationId ?? ""}</p><p><strong>Payment:</strong> ${safeVars.paymentStatus ?? ""}<br/><strong>Amount:</strong> ${safeVars.amountPaid ?? ""}<br/><strong>Payment reference:</strong> ${safeVars.paymentReference ?? "Not applicable"}</p><p>${safeVars.recipientRole === "admin" ? "A participant has registered for this event." : "Thank you for joining our community."}</p>`,
     },
     booking_cancelled: {
       subject: "Session booking cancelled",
