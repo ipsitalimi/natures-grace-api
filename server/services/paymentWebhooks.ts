@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAdmin } from "../lib/supabaseAdmin";
 import { fulfillStoreOrderPayment } from "./orderFulfillment";
 import { fulfillBookingPayment, sendPaidBookingReceipts } from "./bookingFulfillment";
+import { sendEventRegistrationReceipts } from "./eventFulfillment";
 
 export function verifyPaymentWebhookSignature(
   rawBody: Buffer | string,
@@ -137,6 +138,7 @@ export async function handlePaymentCaptured(payload: {
       eventRegistration.payment_status === "Paid" &&
       eventRegistration.razorpay_payment_id === paymentId
     ) {
+      await sendEventRegistrationReceipts(supabase, { registrationId: eventRegistration.id });
       return { matched: true, type: "event_registration", id: eventRegistration.id };
     }
 
@@ -154,6 +156,7 @@ export async function handlePaymentCaptured(payload: {
         .maybeSingle();
 
       if (!updateError && updated) {
+        await sendEventRegistrationReceipts(supabase, { registrationId: eventRegistration.id });
         return { matched: true, type: "event_registration", id: eventRegistration.id };
       }
 
@@ -166,6 +169,7 @@ export async function handlePaymentCaptured(payload: {
         current?.payment_status === "Paid" &&
         current.razorpay_payment_id === paymentId
       ) {
+        await sendEventRegistrationReceipts(supabase, { registrationId: eventRegistration.id });
         return { matched: true, type: "event_registration", id: eventRegistration.id };
       }
     }
