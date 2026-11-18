@@ -12,6 +12,7 @@ import {
   type BookingDraft,
 } from "../services/bookingFulfillment";
 import { calculateCheckoutTotal, fetchCheckoutFeeSettings, fetchCommissionRate } from "../services/platformSettings";
+import { ensureBookingMeetLink } from "../services/googleMeet";
 
 async function validateBookingAmount(
   practitionerId: string,
