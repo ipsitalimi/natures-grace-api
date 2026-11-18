@@ -227,7 +227,94 @@ async function handleConfirmPayment(req: Request, res: Response) {
   }
 }
 
+
+/** POST /api/bookings/free — confirm a zero-price offering without Razorpay. */
+async function handleFreeBooking(req: Request, res: Response) {
+  try {
+    const user = await requireBearerUser(req, res);
+    if (!user) return;
+
+    const booking = req.body as BookingDraft;
+    if (
+      !booking?.practitionerId ||
+      !booking?.offeringId ||
+      !booking?.sessionDate ||
+      !booking?.sessionTime ||
+      !Number.isFinite(Number(booking.durationMinutes)) ||
+      Number(booking.durationMinutes) <= 0
+    ) {
+      return res.status(400).json({ error: "A valid free session booking is required" });
+    }
+    if (Number(booking.amountInr) !== 0) {
+      return res.status(400).json({ error: "This endpoint only accepts zero-price offerings" });
+    }
+
+    const supabase = requireSupabaseAdmin();
+    const { data: offering, error: offeringError } = await supabase
+      .from("practitioner_offerings")
+      .select("id, practitioner_id, duration_minutes, price, is_active")
+      .eq("id", booking.offeringId)
+      .maybeSingle();
+
+    if (offeringError || !offering) {
+      return res.status(404).json({ error: "Session offering not found" });
+    }
+    if (!offering.is_active || offering.practitioner_id !== booking.practitionerId) {
+      return res.status(400).json({ error: "This session offering is no longer available" });
+    }
+    if (Number(offering.price) !== 0) {
+      return res.status(400).json({ error: "This offering is not free" });
+    }
+    if (Number(offering.duration_minutes) !== Number(booking.durationMinutes)) {
+      return res.status(400).json({ error: "Duration does not match the selected offering" });
+    }
+
+    const { data, error } = await supabase.rpc("create_free_practitioner_booking", {
+      p_user_id: user.id,
+      p_booking: { ...booking, amountInr: 0 },
+    });
+    if (error) {
+      console.error("[bookingCheckout][server] free booking RPC failed", error.message);
+      return res.status(500).json({ error: "Could not confirm free booking" });
+    }
+
+    const result = data as {
+      ok?: boolean;
+      error?: string;
+      booking_id?: string;
+      booking_number?: string;
+    } | null;
+    if (!result?.ok || !result.booking_id || !result.booking_number) {
+      const conflict = result?.error?.toLowerCase().includes("already booked");
+      return res.status(conflict ? 409 : 400).json({
+        error: result?.error ?? "Could not confirm free booking",
+      });
+    }
+
+    // Meet generation is best-effort: the confirmed booking is retained if Google is unavailable.
+    await ensureBookingMeetLink(supabase, result.booking_id);
+
+    const { data: savedBooking } = await supabase
+      .from("practitioner_bookings")
+      .select("meeting_link, meeting_creation_status")
+      .eq("id", result.booking_id)
+      .maybeSingle();
+
+    return res.status(201).json({
+      bookingId: result.booking_id,
+      bookingNumber: result.booking_number,
+      paymentStatus: "Free",
+      meetingLink: savedBooking?.meeting_link ?? null,
+      meetingCreationStatus: savedBooking?.meeting_creation_status ?? "retry",
+    });
+  } catch (err) {
+    console.error("[bookingCheckout][server] free booking failed", err);
+    return res.status(500).json({ error: "Could not confirm free booking" });
+  }
+}
+
 export function registerBookingCheckoutRoutes(app: Express) {
   app.post("/api/bookings/checkout/create-order", handleCreateOrder);
   app.post("/api/bookings/checkout/confirm", handleConfirmPayment);
+  app.post("/api/bookings/free", handleFreeBooking);
 }
