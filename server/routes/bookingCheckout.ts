@@ -13,6 +13,7 @@ import {
 } from "../services/bookingFulfillment";
 import { calculateCheckoutTotal, fetchCheckoutFeeSettings, fetchCommissionRate } from "../services/platformSettings";
 import { ensureBookingMeetLink } from "../services/googleMeet";
+import { sendTransactionalEmail } from "../services/email/emailService";
 
 async function validateBookingAmount(
   practitionerId: string,
@@ -150,6 +151,31 @@ async function handleCreateOrder(req: Request, res: Response) {
   }
 }
 
+async function sendPaidBookingReceipts(supabase: ReturnType<typeof requireSupabaseAdmin>, bookingId: string, paymentId: string): Promise<void> {
+  const { data: booking, error } = await supabase.from("practitioner_bookings")
+    .select("id, booking_number, user_id, practitioner_id, client_name, service_name, session_date, session_time, duration_minutes, amount, platform_fee_inr, platform_gst_inr, total_paid_amount_inr, meeting_link")
+    .eq("id", bookingId).maybeSingle();
+  if (error || !booking) { console.error("[bookingCheckout] receipt booking lookup failed", error?.message); return; }
+  const [customer, practitioner, admins] = await Promise.all([
+    supabase.from("profiles").select("email, full_name").eq("id", booking.user_id).maybeSingle(),
+    supabase.from("practitioners").select("profile_id, name").eq("id", booking.practitioner_id).maybeSingle(),
+    supabase.from("profiles").select("email, full_name").eq("role", "admin"),
+  ]);
+  const practitionerProfile = practitioner.data?.profile_id
+    ? await supabase.from("profiles").select("email, full_name").eq("id", practitioner.data.profile_id).maybeSingle()
+    : { data: null };
+  const rupees = (v: unknown) => "INR " + Number(v ?? 0).toFixed(2);
+  const vars = { bookingNumber: String(booking.booking_number ?? booking.id), customer: String(booking.client_name ?? customer.data?.full_name ?? "Customer"), practitioner: String(practitioner.data?.name ?? "Practitioner"), service: String(booking.service_name ?? "Session"), date: String(booking.session_date ?? ""), time: String(booking.session_time ?? ""), duration: String(booking.duration_minutes ?? ""), serviceAmount: rupees(booking.amount), platformFee: rupees(booking.platform_fee_inr), platformGst: rupees(booking.platform_gst_inr), totalPaid: rupees(booking.total_paid_amount_inr), paymentId, meetingLink: String(booking.meeting_link ?? "") };
+  const recipients = [{ role: "customer", profile: customer.data }, { role: "practitioner", profile: practitionerProfile.data }, ...(admins.data ?? []).map((profile: { email?: string | null; full_name?: string | null }) => ({ role: "admin", profile }))];
+  const sentTo = new Set<string>();
+  for (const recipient of recipients) {
+    const email = recipient.profile?.email?.trim().toLowerCase();
+    if (!email || sentTo.has(email)) continue;
+    sentTo.add(email);
+    const result = await sendTransactionalEmail("booking_confirmed", email, { ...vars, name: recipient.profile?.full_name?.split(" ")[0] ?? "there", recipientRole: recipient.role });
+    if (!result.ok || result.skipped) console.error("[bookingCheckout] receipt email not delivered", { role: recipient.role, error: result.ok ? "provider skipped" : result.error });
+  }
+}
 /** POST /api/bookings/checkout/confirm */
 async function handleConfirmPayment(req: Request, res: Response) {
   try {
@@ -217,6 +243,7 @@ async function handleConfirmPayment(req: Request, res: Response) {
 
     // Booking and wallet are committed; Meet creation is best-effort and cannot undo payment.
     await ensureBookingMeetLink(supabase, created.bookingId);
+    await sendPaidBookingReceipts(supabase, created.bookingId, verified.paymentId);
 
     return res.json({
       paymentId: verified.paymentId,
