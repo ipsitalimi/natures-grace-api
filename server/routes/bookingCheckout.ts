@@ -172,7 +172,7 @@ async function sendPaidBookingReceipts(supabase: ReturnType<typeof requireSupaba
     const email = recipient.profile?.email?.trim().toLowerCase();
     if (!email || sentTo.has(email)) continue;
     sentTo.add(email);
-    const result = await sendTransactionalEmail("booking_confirmed", email, { ...vars, name: recipient.profile?.full_name?.split(" ")[0] ?? "there", recipientRole: recipient.role });
+    const result = await sendTransactionalEmail("booking_confirmed", email, { ...vars, name: recipient.profile?.full_name?.split(" ")[0] ?? "there", recipientRole: recipient.role }, "booking-" + bookingId + "-" + recipient.role + "-receipt");
     if (!result.ok || result.skipped) console.error("[bookingCheckout] receipt email not delivered", { role: recipient.role, error: result.ok ? "provider skipped" : result.error });
   }
 }
