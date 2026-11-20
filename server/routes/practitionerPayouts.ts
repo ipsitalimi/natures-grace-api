@@ -4,7 +4,7 @@ import {
   getPayoutById,
   reconcilePendingPayout,
 } from "../services/practitionerPayoutLifecycle";
-import { getBearerUser } from "../middleware/auth";
+import { requireRole } from "../middleware/auth";
 import { verifyPractitionerPayoutOwnership } from "../services/practitionerWalletLedger";
 import {
   MANUAL_PAYOUT_MESSAGE,
@@ -19,13 +19,13 @@ function paramId(value: string | string[]): string {
 /** POST /api/practitioner-payouts/:payoutId/dispatch — queue payout for manual admin transfer */
 async function handleDispatch(req: Request, res: Response) {
   try {
-    const user = await getBearerUser(req);
-    if (!user) return res.status(401).json({ error: "Unauthorized" });
+    const profile = await requireRole(req, res, "Practitioner");
+    if (!profile) return;
 
     const payoutId = paramId(req.params.payoutId);
     const supabase = requireSupabaseAdmin();
 
-    const ownsPayout = await verifyPractitionerPayoutOwnership(supabase, payoutId, user.id);
+    const ownsPayout = await verifyPractitionerPayoutOwnership(supabase, payoutId, profile.id);
     if (!ownsPayout) {
       return res.status(403).json({ error: "Forbidden" });
     }
