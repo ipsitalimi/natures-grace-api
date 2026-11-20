@@ -80,11 +80,15 @@ async function updatePractitionerPayoutStatus(
 
   const profileId = (payout as { practitioner_wallets?: { practitioners?: { profile_id?: string } } })
     .practitioner_wallets?.practitioners?.profile_id ?? null;
-  if (profileId && status === "Completed") {
+  if (profileId && (status === "Completed" || status === "Rejected")) {
     const amountStr = `₹${Number((payout as { amount: number }).amount).toLocaleString("en-IN")}`;
     await dispatchUserNotification(supabase, {
-      userId: profileId, event: "withdrawal_completed",
-      message: `Your withdrawal of ${amountStr} has been completed.`, linkRoute: "Main",
+      userId: profileId,
+      event: status === "Completed" ? "withdrawal_completed" : "withdrawal_received",
+      message: status === "Completed"
+        ? `Your withdrawal of ${amountStr} has been completed.`
+        : `Your withdrawal of ${amountStr} was rejected. The reserved amount has been returned to your available wallet balance.`,
+      linkRoute: "Main",
     });
   }
   return { ok: true };
