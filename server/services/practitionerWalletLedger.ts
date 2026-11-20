@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { validateBankDetailsInput } from "../lib/walletBank";
+import { isPractitionerBankAccountLinkedForPayout, validateBankDetailsInput } from "../lib/walletBank";
 
 type BookingRow = {
   id: string;
