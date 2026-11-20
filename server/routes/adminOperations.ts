@@ -141,12 +141,13 @@ export function registerAdminOperationsRoutes(app: Express) {
     if (rejectionReason && rejectionReason.length > 500) {
       return res.status(400).json({ error: "Rejection reason is too long" });
     }
+    const payoutStatus = status as PayoutStatus;
 
     const result =
       typeParam === "seller"
-        ? await updateSellerPayoutStatus(payoutId, status, admin.id, rejectionReason)
+        ? await updateSellerPayoutStatus(payoutId, payoutStatus, admin.id, rejectionReason)
         : typeParam === "practitioner"
-          ? await updatePractitionerPayoutStatus(payoutId, status, admin.id, rejectionReason)
+          ? await updatePractitionerPayoutStatus(payoutId, payoutStatus, admin.id, rejectionReason)
           : { error: "Invalid type" };
 
     if ("error" in result && result.error) {
@@ -157,7 +158,7 @@ export function registerAdminOperationsRoutes(app: Express) {
       actorId: admin.id,
       actorName: admin.email,
       actionType: "settings",
-      description: `Payout ${payoutId} marked ${status}`,
+      description: `Payout ${payoutId} marked ${payoutStatus}`,
       targetType: "payout",
       targetId: payoutId,
     });
