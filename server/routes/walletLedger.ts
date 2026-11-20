@@ -191,9 +191,13 @@ async function handlePractitionerRequestPayout(req: Request, res: Response) {
     const profile = await requireRole(req, res, "Practitioner");
     if (!profile) return;
 
-    const { amount } = req.body as { amount?: number };
-    if (!amount || amount <= 0) {
-      return res.status(400).json({ error: "amount is required" });
+    const body =
+      req.body && typeof req.body === "object" && !Array.isArray(req.body)
+        ? (req.body as Record<string, unknown>)
+        : {};
+    const amount = body.amount;
+    if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0 || amount > 100_000_000) {
+      return res.status(400).json({ error: "Enter a valid positive payout amount" });
     }
 
     const supabase = requireSupabaseAdmin();
