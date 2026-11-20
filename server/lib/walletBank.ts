@@ -4,12 +4,6 @@ export function isBankAccountLinkedForPayout(label: string | null | undefined): 
   return !trimmed.toLowerCase().includes("not linked");
 }
 
-export function isPractitionerBankAccountLinkedForPayout(label: string | null | undefined): boolean {
-  const normalized = label?.trim().toLowerCase() ?? "";
-  if (normalized === "hdfc bank ···· 4821") return false;
-  return isBankAccountLinkedForPayout(label);
-}
-
 export function formatBankAccountLabel(bankName: string, last4: string): string {
   return `${bankName.trim()} ···· ${last4.trim()}`;
 }
