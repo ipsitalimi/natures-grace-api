@@ -9,7 +9,6 @@ import {
 } from "../services/sellerWalletLedger";
 import { dispatchUserNotification } from "../services/notificationDispatch";
 import {
-  requestPractitionerPayout,
   resolvePractitionerIdForProfile,
   syncPractitionerWalletFromBookings,
   updatePractitionerBankDetails,
@@ -187,50 +186,15 @@ async function handlePractitionerBankDetails(req: Request, res: Response) {
 }
 
 async function handlePractitionerRequestPayout(req: Request, res: Response) {
-  try {
-    const profile = await requireRole(req, res, "Practitioner");
-    if (!profile) return;
+  const profile = await requireRole(req, res, "Practitioner");
+  if (!profile) return;
 
-    const body =
-      req.body && typeof req.body === "object" && !Array.isArray(req.body)
-        ? (req.body as Record<string, unknown>)
-        : {};
-    const amount = body.amount;
-    if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0 || amount > 100_000_000) {
-      return res.status(400).json({ error: "Enter a valid positive payout amount" });
-    }
-
-    const supabase = requireSupabaseAdmin();
-    const practitionerId = await resolvePractitionerIdForProfile(supabase, profile.id);
-    if (!practitionerId) {
-      return res.status(404).json({ error: "Practitioner profile not found" });
-    }
-
-    const commissionRate = await fetchCommissionRate(supabase);
-    const result = await requestPractitionerPayout(
-      supabase,
-      practitionerId,
-      Number(amount),
-      commissionRate
-    );
-
-    if (result.error) {
-      return res.status(400).json({ error: result.error });
-    }
-
-    await dispatchUserNotification(supabase, {
-      userId: profile.id,
-      event: "withdrawal_received",
-      message: `Withdrawal request of ₹${Number(amount).toLocaleString("en-IN")} received. Processed within 3–7 business days.`,
-      linkRoute: "Main",
-      emailVars: { amount: `₹${Number(amount).toLocaleString("en-IN")}` },
-    });
-
-    return res.json({ payoutId: result.payoutId, status: "Pending" });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Payout request failed";
-    return res.status(500).json({ error: message });
-  }
+  // Practitioner payouts are reconciled and transferred manually by the admin
+  // team on the agreed payout cycle. Do not create self-service withdrawal rows.
+  return res.status(409).json({
+    error: "Practitioner payouts are processed manually by the Nature's Grace admin team. You do not need to request a withdrawal.",
+    manualPayouts: true,
+  });
 }
 
 export function registerWalletLedgerRoutes(app: Express) {
