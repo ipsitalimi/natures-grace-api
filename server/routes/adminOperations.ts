@@ -80,11 +80,15 @@ async function updatePractitionerPayoutStatus(
 
   const profileId = (payout as { practitioner_wallets?: { practitioners?: { profile_id?: string } } })
     .practitioner_wallets?.practitioners?.profile_id ?? null;
-  if (profileId && status === "Completed") {
+  if (profileId && (status === "Completed" || status === "Rejected")) {
     const amountStr = `₹${Number((payout as { amount: number }).amount).toLocaleString("en-IN")}`;
     await dispatchUserNotification(supabase, {
-      userId: profileId, event: "withdrawal_completed",
-      message: `Your withdrawal of ${amountStr} has been completed.`, linkRoute: "Main",
+      userId: profileId,
+      event: status === "Completed" ? "withdrawal_completed" : "withdrawal_received",
+      message: status === "Completed"
+        ? `Your withdrawal of ${amountStr} has been completed.`
+        : `Your withdrawal of ${amountStr} was rejected. The reserved amount has been returned to your available wallet balance.`,
+      linkRoute: "Main",
     });
   }
   return { ok: true };
@@ -104,7 +108,7 @@ export function registerAdminOperationsRoutes(app: Express) {
         .limit(100),
       supabase
         .from("practitioner_payouts")
-        .select("*, practitioner_wallets(practitioner_id, practitioners(name, profile_id))")
+        .select("*, practitioner_wallets(practitioner_id, bank_account_label, bank_account_holder, practitioners(name, profile_id))")
         .order("created_at", { ascending: false })
         .limit(100),
     ]);
@@ -121,21 +125,29 @@ export function registerAdminOperationsRoutes(app: Express) {
 
     const typeParam = String(Array.isArray(req.params.type) ? req.params.type[0] : req.params.type);
     const payoutId = String(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
-    const { status, rejectionReason } = req.body as {
-      status: PayoutStatus;
-      rejectionReason?: string;
-    };
+    const body =
+      req.body && typeof req.body === "object" && !Array.isArray(req.body)
+        ? (req.body as Record<string, unknown>)
+        : {};
+    const status = body.status;
+    const rejectionReason = typeof body.rejectionReason === "string"
+      ? body.rejectionReason.trim()
+      : undefined;
 
     const allowed: PayoutStatus[] = ["Under Review", "Processing", "Completed", "Rejected"];
-    if (!allowed.includes(status)) {
+    if (typeof status !== "string" || !allowed.includes(status as PayoutStatus)) {
       return res.status(400).json({ error: "Invalid status" });
     }
+    if (rejectionReason && rejectionReason.length > 500) {
+      return res.status(400).json({ error: "Rejection reason is too long" });
+    }
+    const payoutStatus = status as PayoutStatus;
 
     const result =
       typeParam === "seller"
-        ? await updateSellerPayoutStatus(payoutId, status, admin.id, rejectionReason)
+        ? await updateSellerPayoutStatus(payoutId, payoutStatus, admin.id, rejectionReason)
         : typeParam === "practitioner"
-          ? await updatePractitionerPayoutStatus(payoutId, status, admin.id, rejectionReason)
+          ? await updatePractitionerPayoutStatus(payoutId, payoutStatus, admin.id, rejectionReason)
           : { error: "Invalid type" };
 
     if ("error" in result && result.error) {
@@ -146,7 +158,7 @@ export function registerAdminOperationsRoutes(app: Express) {
       actorId: admin.id,
       actorName: admin.email,
       actionType: "settings",
-      description: `Payout ${payoutId} marked ${status}`,
+      description: `Payout ${payoutId} marked ${payoutStatus}`,
       targetType: "payout",
       targetId: payoutId,
     });

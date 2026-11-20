@@ -9,7 +9,6 @@ import {
 } from "../services/sellerWalletLedger";
 import { dispatchUserNotification } from "../services/notificationDispatch";
 import {
-  requestPractitionerPayout,
   resolvePractitionerIdForProfile,
   syncPractitionerWalletFromBookings,
   updatePractitionerBankDetails,
@@ -41,11 +40,13 @@ async function handleSellerBankDetails(req: Request, res: Response) {
     const profile = await requireRole(req, res, "Seller");
     if (!profile) return;
 
-    const { bankName, last4, accountHolder } = req.body as {
-      bankName?: string;
-      last4?: string;
-      accountHolder?: string;
-    };
+    const body =
+      req.body && typeof req.body === "object" && !Array.isArray(req.body)
+        ? (req.body as Record<string, unknown>)
+        : {};
+    const bankName = typeof body.bankName === "string" ? body.bankName : "";
+    const last4 = typeof body.last4 === "string" ? body.last4 : "";
+    const accountHolder = typeof body.accountHolder === "string" ? body.accountHolder : "";
 
     const supabase = requireSupabaseAdmin();
     const sellerId = await resolveSellerIdForProfile(supabase, profile.id);
@@ -76,9 +77,13 @@ async function handleSellerRequestPayout(req: Request, res: Response) {
     const profile = await requireRole(req, res, "Seller");
     if (!profile) return;
 
-    const { amount } = req.body as { amount?: number };
-    if (!amount || amount <= 0) {
-      return res.status(400).json({ error: "amount is required" });
+    const body =
+      req.body && typeof req.body === "object" && !Array.isArray(req.body)
+        ? (req.body as Record<string, unknown>)
+        : {};
+    const amount = body.amount;
+    if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0 || amount > 100_000_000) {
+      return res.status(400).json({ error: "Enter a valid positive payout amount" });
     }
 
     const supabase = requireSupabaseAdmin();
@@ -143,11 +148,13 @@ async function handlePractitionerBankDetails(req: Request, res: Response) {
     const profile = await requireRole(req, res, "Practitioner");
     if (!profile) return;
 
-    const { bankName, last4, accountHolder } = req.body as {
-      bankName?: string;
-      last4?: string;
-      accountHolder?: string;
-    };
+    const body =
+      req.body && typeof req.body === "object" && !Array.isArray(req.body)
+        ? (req.body as Record<string, unknown>)
+        : {};
+    const bankName = typeof body.bankName === "string" ? body.bankName : "";
+    const last4 = typeof body.last4 === "string" ? body.last4 : "";
+    const accountHolder = typeof body.accountHolder === "string" ? body.accountHolder : "";
 
     const supabase = requireSupabaseAdmin();
     const practitionerId = await resolvePractitionerIdForProfile(supabase, profile.id);
@@ -179,46 +186,13 @@ async function handlePractitionerBankDetails(req: Request, res: Response) {
 }
 
 async function handlePractitionerRequestPayout(req: Request, res: Response) {
-  try {
-    const profile = await requireRole(req, res, "Practitioner");
-    if (!profile) return;
+  const profile = await requireRole(req, res, "Practitioner");
+  if (!profile) return;
 
-    const { amount } = req.body as { amount?: number };
-    if (!amount || amount <= 0) {
-      return res.status(400).json({ error: "amount is required" });
-    }
-
-    const supabase = requireSupabaseAdmin();
-    const practitionerId = await resolvePractitionerIdForProfile(supabase, profile.id);
-    if (!practitionerId) {
-      return res.status(404).json({ error: "Practitioner profile not found" });
-    }
-
-    const commissionRate = await fetchCommissionRate(supabase);
-    const result = await requestPractitionerPayout(
-      supabase,
-      practitionerId,
-      Number(amount),
-      commissionRate
-    );
-
-    if (result.error) {
-      return res.status(400).json({ error: result.error });
-    }
-
-    await dispatchUserNotification(supabase, {
-      userId: profile.id,
-      event: "withdrawal_received",
-      message: `Withdrawal request of ₹${Number(amount).toLocaleString("en-IN")} received. Processed within 3–7 business days.`,
-      linkRoute: "Main",
-      emailVars: { amount: `₹${Number(amount).toLocaleString("en-IN")}` },
-    });
-
-    return res.json({ payoutId: result.payoutId, status: "Pending" });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Payout request failed";
-    return res.status(500).json({ error: message });
-  }
+  return res.status(409).json({
+    error: "Practitioner payouts are processed manually by the admin team. You do not need to submit a withdrawal request.",
+    manualPayouts: true,
+  });
 }
 
 export function registerWalletLedgerRoutes(app: Express) {

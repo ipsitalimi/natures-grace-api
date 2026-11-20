@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { isBankAccountLinkedForPayout, validateBankDetailsInput } from "../lib/walletBank";
+import { validateBankDetailsInput } from "../lib/walletBank";
 
 type BookingRow = {
   id: string;
@@ -241,46 +241,23 @@ export async function updatePractitionerBankDetails(
   const wallet = await getOrCreatePractitionerWallet(supabase, practitionerId, commissionRate);
   if (!wallet) return { error: "Wallet not found" };
 
-  const { error } = await supabase
+  const { data: updated, error } = await supabase
     .from("practitioner_wallets")
-    .update({ bank_account_label: validated.label })
-    .eq("id", wallet.id);
+    .update({
+      bank_account_label: validated.label,
+      bank_account_holder: validated.accountHolder,
+    })
+    .eq("id", wallet.id)
+    .eq("practitioner_id", practitionerId)
+    .select("id")
+    .maybeSingle();
 
   if (error) return { error: error.message };
+  if (!updated?.id) return { error: "Wallet not found or bank details were not saved" };
   return {};
 }
 
-export async function requestPractitionerPayout(
-  supabase: SupabaseClient,
-  practitionerId: string,
-  amount: number,
-  commissionRate: number
-): Promise<{ payoutId?: string; error?: string }> {
-  const wallet = await getOrCreatePractitionerWallet(supabase, practitionerId, commissionRate);
-  if (!wallet) return { error: "Wallet not found" };
 
-  const { data: walletRow, error: walletError } = await supabase
-    .from("practitioner_wallets")
-    .select("bank_account_label")
-    .eq("id", wallet.id)
-    .maybeSingle();
-  if (walletError) return { error: walletError.message };
-  if (!isBankAccountLinkedForPayout((walletRow as { bank_account_label?: string | null } | null)?.bank_account_label)) {
-    return { error: "Bank account details required before requesting a withdrawal" };
-  }
-  if (!Number.isFinite(amount) || amount <= 0) return { error: "Invalid amount" };
-
-  const { data, error } = await supabase.rpc("request_wallet_payout", {
-    p_payout_type: "practitioner",
-    p_wallet_id: wallet.id,
-    p_amount: Math.round(amount * 100) / 100,
-    p_notes: "Manual withdrawal — processed by Nature's Grace team within 3–7 business days",
-  });
-  if (error) return { error: error.message };
-  const result = data as { ok?: boolean; error?: string; payout_id?: string } | null;
-  if (!result?.ok || !result.payout_id) return { error: result?.error ?? "Could not create payout" };
-  return { payoutId: result.payout_id };
-}
 
 export async function verifyPractitionerPayoutOwnership(
   supabase: SupabaseClient,

@@ -12,20 +12,23 @@ export function validateBankDetailsInput(input: {
   bankName?: string;
   last4?: string;
   accountHolder?: string;
-}): { ok: true; label: string } | { ok: false; error: string } {
-  const bankName = input.bankName?.trim() ?? "";
-  const last4 = (input.last4 ?? "").replace(/\D/g, "").slice(-4);
-  const accountHolder = input.accountHolder?.trim() ?? "";
+}): { ok: true; label: string; accountHolder: string } | { ok: false; error: string } {
+  const rawBankName = typeof input.bankName === "string" ? input.bankName : "";
+  const rawLast4 = typeof input.last4 === "string" ? input.last4 : "";
+  const rawAccountHolder = typeof input.accountHolder === "string" ? input.accountHolder : "";
+  const bankName = rawBankName.trim();
+  const accountHolder = rawAccountHolder.trim();
+  const last4 = rawLast4.replace(/\D/g, "").slice(-4);
 
-  if (!accountHolder || accountHolder.length < 2) {
-    return { ok: false, error: "Account holder name is required" };
+  if (accountHolder.length < 2 || accountHolder.length > 100) {
+    return { ok: false, error: "Enter an account holder name between 2 and 100 characters" };
   }
-  if (!bankName || bankName.length < 2) {
-    return { ok: false, error: "Bank name is required" };
+  if (bankName.length < 2 || bankName.length > 80) {
+    return { ok: false, error: "Enter a bank name between 2 and 80 characters" };
   }
-  if (last4.length !== 4) {
-    return { ok: false, error: "Enter the last 4 digits of your account number" };
+  if (!/^\d{4}$/.test(last4)) {
+    return { ok: false, error: "Enter exactly the last 4 digits of your account number" };
   }
 
-  return { ok: true, label: formatBankAccountLabel(bankName, last4) };
+  return { ok: true, label: formatBankAccountLabel(bankName, last4), accountHolder };
 }
