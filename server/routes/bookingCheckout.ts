@@ -22,6 +22,18 @@ async function validateBookingAmount(
   offeringId?: string
 ): Promise<{ ok: true; amountInr: number } | { ok: false; error: string }> {
   const supabase = requireSupabaseAdmin();
+  const { data: practitioner, error: practitionerError } = await supabase
+    .from("practitioners")
+    .select("is_active, approval_status, price_per_session")
+    .eq("id", practitionerId)
+    .maybeSingle();
+
+  if (practitionerError || !practitioner) {
+    return { ok: false, error: "Practitioner not found" };
+  }
+  if (practitioner.is_active !== true || practitioner.approval_status !== "Approved") {
+    return { ok: false, error: "This practitioner is not currently accepting bookings" };
+  }
 
   if (offeringId) {
     const { data: offering, error } = await supabase
@@ -48,16 +60,6 @@ async function validateBookingAmount(
       return { ok: false, error: "Booking amount does not match offering price" };
     }
     return { ok: true, amountInr: expected };
-  }
-
-  const { data: practitioner, error } = await supabase
-    .from("practitioners")
-    .select("price_per_session")
-    .eq("id", practitionerId)
-    .maybeSingle();
-
-  if (error || !practitioner) {
-    return { ok: false, error: "Practitioner not found" };
   }
 
   const expected = calculateSessionPrice(
@@ -255,6 +257,19 @@ async function handleFreeBooking(req: Request, res: Response) {
     }
 
     const supabase = requireSupabaseAdmin();
+    const { data: practitioner, error: practitionerError } = await supabase
+      .from("practitioners")
+      .select("is_active, approval_status")
+      .eq("id", booking.practitionerId)
+      .maybeSingle();
+
+    if (practitionerError || !practitioner) {
+      return res.status(404).json({ error: "Practitioner not found" });
+    }
+    if (practitioner.is_active !== true || practitioner.approval_status !== "Approved") {
+      return res.status(400).json({ error: "This practitioner is not currently accepting bookings" });
+    }
+
     const { data: offering, error: offeringError } = await supabase
       .from("practitioner_offerings")
       .select("id, practitioner_id, duration_minutes, price, is_active")
