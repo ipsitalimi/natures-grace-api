@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { isBankAccountLinkedForPayout, validateBankDetailsInput } from "../lib/walletBank";
+import { isPractitionerBankAccountLinkedForPayout, validateBankDetailsInput } from "../lib/walletBank";
 
 type BookingRow = {
   id: string;
@@ -276,7 +276,7 @@ export async function requestPractitionerPayout(
     bank_account_label?: string | null;
     bank_account_holder?: string | null;
   } | null;
-  if (!isBankAccountLinkedForPayout(bankDetails?.bank_account_label) || !bankDetails?.bank_account_holder?.trim()) {
+  if (!isPractitionerBankAccountLinkedForPayout(bankDetails?.bank_account_label) || !bankDetails?.bank_account_holder?.trim()) {
     return { error: "Complete your bank account details before requesting a withdrawal" };
   }
   if (!Number.isFinite(amount) || amount <= 0 || amount > 100_000_000) return { error: "Invalid amount" };
