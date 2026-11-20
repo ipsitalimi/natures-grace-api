@@ -104,7 +104,7 @@ export function registerAdminOperationsRoutes(app: Express) {
         .limit(100),
       supabase
         .from("practitioner_payouts")
-        .select("*, practitioner_wallets(practitioner_id, practitioners(name, profile_id))")
+        .select("*, practitioner_wallets(practitioner_id, bank_account_label, bank_account_holder, practitioners(name, profile_id))")
         .order("created_at", { ascending: false })
         .limit(100),
     ]);
