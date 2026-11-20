@@ -41,11 +41,13 @@ async function handleSellerBankDetails(req: Request, res: Response) {
     const profile = await requireRole(req, res, "Seller");
     if (!profile) return;
 
-    const { bankName, last4, accountHolder } = req.body as {
-      bankName?: string;
-      last4?: string;
-      accountHolder?: string;
-    };
+    const body =
+      req.body && typeof req.body === "object" && !Array.isArray(req.body)
+        ? (req.body as Record<string, unknown>)
+        : {};
+    const bankName = typeof body.bankName === "string" ? body.bankName : "";
+    const last4 = typeof body.last4 === "string" ? body.last4 : "";
+    const accountHolder = typeof body.accountHolder === "string" ? body.accountHolder : "";
 
     const supabase = requireSupabaseAdmin();
     const sellerId = await resolveSellerIdForProfile(supabase, profile.id);
@@ -76,9 +78,13 @@ async function handleSellerRequestPayout(req: Request, res: Response) {
     const profile = await requireRole(req, res, "Seller");
     if (!profile) return;
 
-    const { amount } = req.body as { amount?: number };
-    if (!amount || amount <= 0) {
-      return res.status(400).json({ error: "amount is required" });
+    const body =
+      req.body && typeof req.body === "object" && !Array.isArray(req.body)
+        ? (req.body as Record<string, unknown>)
+        : {};
+    const amount = body.amount;
+    if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0 || amount > 100_000_000) {
+      return res.status(400).json({ error: "Enter a valid positive payout amount" });
     }
 
     const supabase = requireSupabaseAdmin();
@@ -143,11 +149,13 @@ async function handlePractitionerBankDetails(req: Request, res: Response) {
     const profile = await requireRole(req, res, "Practitioner");
     if (!profile) return;
 
-    const { bankName, last4, accountHolder } = req.body as {
-      bankName?: string;
-      last4?: string;
-      accountHolder?: string;
-    };
+    const body =
+      req.body && typeof req.body === "object" && !Array.isArray(req.body)
+        ? (req.body as Record<string, unknown>)
+        : {};
+    const bankName = typeof body.bankName === "string" ? body.bankName : "";
+    const last4 = typeof body.last4 === "string" ? body.last4 : "";
+    const accountHolder = typeof body.accountHolder === "string" ? body.accountHolder : "";
 
     const supabase = requireSupabaseAdmin();
     const practitionerId = await resolvePractitionerIdForProfile(supabase, profile.id);
@@ -183,9 +191,13 @@ async function handlePractitionerRequestPayout(req: Request, res: Response) {
     const profile = await requireRole(req, res, "Practitioner");
     if (!profile) return;
 
-    const { amount } = req.body as { amount?: number };
-    if (!amount || amount <= 0) {
-      return res.status(400).json({ error: "amount is required" });
+    const body =
+      req.body && typeof req.body === "object" && !Array.isArray(req.body)
+        ? (req.body as Record<string, unknown>)
+        : {};
+    const amount = body.amount;
+    if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0 || amount > 100_000_000) {
+      return res.status(400).json({ error: "Enter a valid positive payout amount" });
     }
 
     const supabase = requireSupabaseAdmin();
