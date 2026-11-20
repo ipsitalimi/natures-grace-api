@@ -10,7 +10,6 @@ import {
 import { dispatchUserNotification } from "../services/notificationDispatch";
 import {
   resolvePractitionerIdForProfile,
-  requestPractitionerPayout,
   syncPractitionerWalletFromBookings,
   updatePractitionerBankDetails,
 } from "../services/practitionerWalletLedger";
@@ -187,51 +186,13 @@ async function handlePractitionerBankDetails(req: Request, res: Response) {
 }
 
 async function handlePractitionerRequestPayout(req: Request, res: Response) {
-  try {
-    const profile = await requireRole(req, res, "Practitioner");
-    if (!profile) return;
+  const profile = await requireRole(req, res, "Practitioner");
+  if (!profile) return;
 
-    const body =
-      req.body && typeof req.body === "object" && !Array.isArray(req.body)
-        ? (req.body as Record<string, unknown>)
-        : {};
-    const amount = body.amount;
-    if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0 || amount > 100_000_000) {
-      return res.status(400).json({ error: "Enter a valid positive payout amount" });
-    }
-
-    const supabase = requireSupabaseAdmin();
-    const practitionerId = await resolvePractitionerIdForProfile(supabase, profile.id);
-    if (!practitionerId) {
-      return res.status(404).json({ error: "Practitioner profile not found" });
-    }
-
-    const commissionRate = await fetchCommissionRate(supabase);
-    const result = await requestPractitionerPayout(
-      supabase,
-      practitionerId,
-      amount,
-      commissionRate
-    );
-
-    if (result.error) {
-      return res.status(400).json({ error: result.error });
-    }
-
-    await dispatchUserNotification(supabase, {
-      userId: profile.id,
-      event: "withdrawal_received",
-      message: `Withdrawal request of ₹${amount.toLocaleString("en-IN")} received. It will be reviewed and transferred manually by the Nature's Grace admin team.`,
-      linkRoute: "Main",
-      emailVars: { amount: `₹${amount.toLocaleString("en-IN")}` },
-    });
-
-    return res.json({ payoutId: result.payoutId, status: "Pending", manualPayouts: true });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Payout request failed";
-    console.error("[wallet-ledger] practitioner payout request:", err);
-    return res.status(500).json({ error: message });
-  }
+  return res.status(409).json({
+    error: "Practitioner payouts are processed manually by the admin team. You do not need to submit a withdrawal request.",
+    manualPayouts: true,
+  });
 }
 
 export function registerWalletLedgerRoutes(app: Express) {
