@@ -7,7 +7,13 @@ export type AuthProfile = {
   id: string;
   email: string;
   role: string;
+  status?: string | null;
 };
+
+export function isInactiveAccountStatus(status: string | null | undefined): boolean {
+  const normalized = status?.trim().toLowerCase() ?? "";
+  return normalized === "suspended" || normalized === "deletion requested" || normalized === "deleted";
+}
 
 export async function getBearerUser(req: Request): Promise<AuthUser | null> {
   const authHeader = req.header("authorization");
@@ -56,7 +62,7 @@ export async function getBearerProfile(req: Request): Promise<AuthProfile | null
   const supabase = requireSupabaseAdmin();
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, email, role")
+    .select("id, email, role, status")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -89,6 +95,10 @@ export async function requireRole(
   }
   if (profile.role !== role) {
     res.status(403).json({ error: "Forbidden" });
+    return null;
+  }
+  if (isInactiveAccountStatus(profile.status)) {
+    res.status(403).json({ error: "Account is inactive" });
     return null;
   }
   return profile;
