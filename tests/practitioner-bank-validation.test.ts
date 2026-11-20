@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   formatBankAccountLabel,
   isBankAccountLinkedForPayout,
+  isPractitionerBankAccountLinkedForPayout,
   validateBankDetailsInput,
 } from "../server/lib/walletBank";
 
@@ -40,9 +41,11 @@ test("account holder is trimmed before it is persisted", () => {
   if (result.ok) assert.equal(result.accountHolder, "A Practitioner");
 });
 
-test("bank account labels use only the validated display fields", () => {
+test("bank account labels distinguish practitioner placeholders without changing seller behavior", () => {
   assert.equal(formatBankAccountLabel("HDFC Bank", "1234"), "HDFC Bank ···· 1234");
-  assert.equal(isBankAccountLinkedForPayout("HDFC Bank ···· 1234"), true);
+  assert.equal(isBankAccountLinkedForPayout("HDFC Bank ···· 4821"), true);
+  assert.equal(isPractitionerBankAccountLinkedForPayout("HDFC Bank ···· 4821"), false);
+  assert.equal(isPractitionerBankAccountLinkedForPayout("ICICI Bank ···· 1234"), true);
   assert.equal(isBankAccountLinkedForPayout("Bank account not linked"), false);
   assert.equal(isBankAccountLinkedForPayout(null), false);
 });
