@@ -258,6 +258,50 @@ export async function updatePractitionerBankDetails(
 }
 
 
+export async function requestPractitionerPayout(
+  supabase: SupabaseClient,
+  practitionerId: string,
+  amount: number,
+  commissionRate: number
+): Promise<{ payoutId?: string; error?: string }> {
+  if (!Number.isFinite(amount) || amount <= 0 || amount > 100_000_000) {
+    return { error: "Invalid amount" };
+  }
+
+  const wallet = await getOrCreatePractitionerWallet(supabase, practitionerId, commissionRate);
+  if (!wallet) return { error: "Wallet not found" };
+
+  const { data: bankDetails, error: bankError } = await supabase
+    .from("practitioner_wallets")
+    .select("bank_account_label, bank_account_holder")
+    .eq("id", wallet.id)
+    .eq("practitioner_id", practitionerId)
+    .maybeSingle();
+
+  if (bankError) return { error: bankError.message };
+  if (
+    !isPractitionerBankAccountLinkedForPayout(bankDetails?.bank_account_label) ||
+    !bankDetails?.bank_account_holder?.trim()
+  ) {
+    return { error: "Complete your bank account details before requesting a withdrawal" };
+  }
+
+  const { data, error } = await supabase.rpc("request_wallet_payout", {
+    p_payout_type: "practitioner",
+    p_wallet_id: wallet.id,
+    p_amount: Math.round(amount * 100) / 100,
+    p_notes: "Manual withdrawal — reviewed and transferred by the Nature's Grace admin team",
+  });
+
+  if (error) return { error: error.message };
+  const result = data as { ok?: boolean; error?: string; payout_id?: string } | null;
+  if (!result?.ok || !result.payout_id) {
+    return { error: result?.error ?? "Could not create payout request" };
+  }
+
+  return { payoutId: result.payout_id };
+}
+
 export async function verifyPractitionerPayoutOwnership(
   supabase: SupabaseClient,
   payoutId: string,
