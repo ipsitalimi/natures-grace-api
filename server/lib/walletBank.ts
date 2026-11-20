@@ -12,7 +12,7 @@ export function validateBankDetailsInput(input: {
   bankName?: string;
   last4?: string;
   accountHolder?: string;
-}): { ok: true; label: string } | { ok: false; error: string } {
+}): { ok: true; label: string; accountHolder: string } | { ok: false; error: string } {
   const rawBankName = typeof input.bankName === "string" ? input.bankName : "";
   const rawLast4 = typeof input.last4 === "string" ? input.last4 : "";
   const rawAccountHolder = typeof input.accountHolder === "string" ? input.accountHolder : "";
@@ -30,5 +30,5 @@ export function validateBankDetailsInput(input: {
     return { ok: false, error: "Enter exactly the last 4 digits of your account number" };
   }
 
-  return { ok: true, label: formatBankAccountLabel(bankName, last4) };
+  return { ok: true, label: formatBankAccountLabel(bankName, last4), accountHolder };
 }
