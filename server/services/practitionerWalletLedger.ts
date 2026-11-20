@@ -268,14 +268,18 @@ export async function requestPractitionerPayout(
 
   const { data: walletRow, error: walletError } = await supabase
     .from("practitioner_wallets")
-    .select("bank_account_label")
+    .select("bank_account_label, bank_account_holder")
     .eq("id", wallet.id)
     .maybeSingle();
   if (walletError) return { error: walletError.message };
-  if (!isBankAccountLinkedForPayout((walletRow as { bank_account_label?: string | null } | null)?.bank_account_label)) {
-    return { error: "Bank account details required before requesting a withdrawal" };
+  const bankDetails = walletRow as {
+    bank_account_label?: string | null;
+    bank_account_holder?: string | null;
+  } | null;
+  if (!isBankAccountLinkedForPayout(bankDetails?.bank_account_label) || !bankDetails?.bank_account_holder?.trim()) {
+    return { error: "Complete your bank account details before requesting a withdrawal" };
   }
-  if (!Number.isFinite(amount) || amount <= 0) return { error: "Invalid amount" };
+  if (!Number.isFinite(amount) || amount <= 0 || amount > 100_000_000) return { error: "Invalid amount" };
 
   const { data, error } = await supabase.rpc("request_wallet_payout", {
     p_payout_type: "practitioner",
