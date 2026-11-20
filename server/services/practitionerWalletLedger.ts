@@ -243,7 +243,10 @@ export async function updatePractitionerBankDetails(
 
   const { data: updated, error } = await supabase
     .from("practitioner_wallets")
-    .update({ bank_account_label: validated.label })
+    .update({
+      bank_account_label: validated.label,
+      bank_account_holder: input.accountHolder.trim(),
+    })
     .eq("id", wallet.id)
     .eq("practitioner_id", practitionerId)
     .select("id")
