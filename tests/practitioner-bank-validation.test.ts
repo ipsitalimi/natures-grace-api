@@ -14,7 +14,7 @@ test("practitioner bank details accept a valid holder, bank and four digits", ()
       last4: "xx 1234",
       accountHolder: " A Practitioner ",
     }),
-    { ok: true, label: "HDFC Bank ···· 1234" },
+    { ok: true, label: "HDFC Bank ···· 1234", accountHolder: "A Practitioner" },
   );
 });
 
@@ -28,6 +28,16 @@ test("practitioner bank details reject missing, malformed and oversized values",
     validateBankDetailsInput({ bankName: 123 as unknown as string, last4: "1234", accountHolder: "A User" }).ok,
     false,
   );
+});
+
+test("account holder is trimmed before it is persisted", () => {
+  const result = validateBankDetailsInput({
+    bankName: " HDFC Bank ",
+    last4: "1234",
+    accountHolder: "  A Practitioner  ",
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.accountHolder, "A Practitioner");
 });
 
 test("bank account labels use only the validated display fields", () => {
