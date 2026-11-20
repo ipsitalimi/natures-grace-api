@@ -18,7 +18,7 @@ export function validateBankDetailsInput(input: {
   const rawAccountHolder = typeof input.accountHolder === "string" ? input.accountHolder : "";
   const bankName = rawBankName.trim();
   const accountHolder = rawAccountHolder.trim();
-  const last4 = rawLast4.replace(/\\D/g, "").slice(-4);
+  const last4 = rawLast4.replace(/\D/g, "").slice(-4);
 
   if (accountHolder.length < 2 || accountHolder.length > 100) {
     return { ok: false, error: "Enter an account holder name between 2 and 100 characters" };
@@ -26,7 +26,7 @@ export function validateBankDetailsInput(input: {
   if (bankName.length < 2 || bankName.length > 80) {
     return { ok: false, error: "Enter a bank name between 2 and 80 characters" };
   }
-  if (!/^\\d{4}$/.test(last4)) {
+  if (!/^\d{4}$/.test(last4)) {
     return { ok: false, error: "Enter exactly the last 4 digits of your account number" };
   }
 
