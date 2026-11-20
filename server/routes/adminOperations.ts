@@ -125,14 +125,21 @@ export function registerAdminOperationsRoutes(app: Express) {
 
     const typeParam = String(Array.isArray(req.params.type) ? req.params.type[0] : req.params.type);
     const payoutId = String(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
-    const { status, rejectionReason } = req.body as {
-      status: PayoutStatus;
-      rejectionReason?: string;
-    };
+    const body =
+      req.body && typeof req.body === "object" && !Array.isArray(req.body)
+        ? (req.body as Record<string, unknown>)
+        : {};
+    const status = body.status;
+    const rejectionReason = typeof body.rejectionReason === "string"
+      ? body.rejectionReason.trim()
+      : undefined;
 
     const allowed: PayoutStatus[] = ["Under Review", "Processing", "Completed", "Rejected"];
-    if (!allowed.includes(status)) {
+    if (typeof status !== "string" || !allowed.includes(status as PayoutStatus)) {
       return res.status(400).json({ error: "Invalid status" });
+    }
+    if (rejectionReason && rejectionReason.length > 500) {
+      return res.status(400).json({ error: "Rejection reason is too long" });
     }
 
     const result =
