@@ -245,7 +245,7 @@ export async function updatePractitionerBankDetails(
     .from("practitioner_wallets")
     .update({
       bank_account_label: validated.label,
-      bank_account_holder: input.accountHolder.trim(),
+      bank_account_holder: validated.accountHolder,
     })
     .eq("id", wallet.id)
     .eq("practitioner_id", practitionerId)
