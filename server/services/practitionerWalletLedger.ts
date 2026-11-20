@@ -241,12 +241,16 @@ export async function updatePractitionerBankDetails(
   const wallet = await getOrCreatePractitionerWallet(supabase, practitionerId, commissionRate);
   if (!wallet) return { error: "Wallet not found" };
 
-  const { error } = await supabase
+  const { data: updated, error } = await supabase
     .from("practitioner_wallets")
     .update({ bank_account_label: validated.label })
-    .eq("id", wallet.id);
+    .eq("id", wallet.id)
+    .eq("practitioner_id", practitionerId)
+    .select("id")
+    .maybeSingle();
 
   if (error) return { error: error.message };
+  if (!updated?.id) return { error: "Wallet not found or bank details were not saved" };
   return {};
 }
 
