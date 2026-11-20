@@ -149,11 +149,13 @@ async function handlePractitionerBankDetails(req: Request, res: Response) {
     const profile = await requireRole(req, res, "Practitioner");
     if (!profile) return;
 
-    const { bankName, last4, accountHolder } = req.body as {
-      bankName?: string;
-      last4?: string;
-      accountHolder?: string;
-    };
+    const body =
+      req.body && typeof req.body === "object" && !Array.isArray(req.body)
+        ? (req.body as Record<string, unknown>)
+        : {};
+    const bankName = typeof body.bankName === "string" ? body.bankName : "";
+    const last4 = typeof body.last4 === "string" ? body.last4 : "";
+    const accountHolder = typeof body.accountHolder === "string" ? body.accountHolder : "";
 
     const supabase = requireSupabaseAdmin();
     const practitionerId = await resolvePractitionerIdForProfile(supabase, profile.id);
