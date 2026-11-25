@@ -3,7 +3,6 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { ensureBookingMeetLink } from "./googleMeet";
 import { sendTransactionalEmail } from "./email/emailService";
 import { dispatchUserNotification } from "./notificationDispatch";
-import { fetchCommissionRate } from "./platformSettings";
 
 export type BookingDraft = {
   practitionerId: string;
@@ -59,7 +58,9 @@ export async function fulfillBookingPayment(params: {
   | { ok: false; error: string }
 > {
   const { supabase, userId, razorpayOrderId, paymentId } = params;
-  const commissionRate = params.commissionRate ?? (await fetchCommissionRate(supabase));
+  // Practitioner session commission is a fixed 30% platform share. This is deliberately
+  // separate from customer-facing checkout fees and from seller order commissions.
+  const commissionRate = 30;
 
   const { data, error } = await supabase.rpc("fulfill_paid_booking_checkout", {
     p_user_id: userId,
