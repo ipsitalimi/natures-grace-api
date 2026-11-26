@@ -84,6 +84,38 @@ export async function fulfillBookingPayment(params: {
   } | null;
 
   if (!result?.ok || !result.booking_id || !result.booking_number) {
+    // A captured payment that cannot claim its slot is persisted for admin review.
+    // Alert admins from both the customer-confirmation and webhook fulfillment paths.
+    try {
+      const { data: reconciliation } = await supabase
+        .from("booking_payment_reconciliation")
+        .select("razorpay_order_id, razorpay_payment_id, practitioner_id, session_date, session_time, reason, user_id")
+        .eq("razorpay_order_id", razorpayOrderId)
+        .maybeSingle();
+      if (reconciliation) {
+        const [{ data: admins }, { data: customer }] = await Promise.all([
+          supabase.from("profiles").select("email").eq("role", "Admin").not("email", "is", null),
+          supabase.from("profiles").select("full_name").eq("id", reconciliation.user_id).maybeSingle(),
+        ]);
+        const recipients = [...new Set((admins ?? []).map((row) => String(row.email ?? "").trim()).filter(Boolean))];
+        await Promise.all(recipients.map((email) => sendTransactionalEmail(
+          "booking_payment_reconciliation_admin",
+          email,
+          {
+            orderId: reconciliation.razorpay_order_id,
+            paymentId: reconciliation.razorpay_payment_id,
+            customerId: customer?.full_name ?? reconciliation.user_id,
+            practitionerId: reconciliation.practitioner_id ?? "Unavailable",
+            sessionDate: reconciliation.session_date ?? "",
+            sessionTime: reconciliation.session_time ?? "",
+            reason: reconciliation.reason ?? "Slot conflict",
+          },
+          `booking-payment-reconciliation-${razorpayOrderId}-${email.toLowerCase()}`
+        )));
+      }
+    } catch (alertError) {
+      console.error("[bookingFulfillment] reconciliation admin alert failed");
+    }
     return { ok: false, error: result?.error ?? "Booking fulfillment failed" };
   }
 
