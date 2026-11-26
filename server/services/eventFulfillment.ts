@@ -78,7 +78,7 @@ export async function sendEventRegistrationReceipts(
       if ((result.ok && !result.skipped) || result.skipped || attempt === 3) break;
       await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
     }
-    if (!result.ok || result.skipped) {
+    if (!result.ok || ("skipped" in result && result.skipped)) {
       console.error("[eventFulfillment] event receipt email not delivered", {
         role: recipient.role,
         error: result.ok ? "Email provider skipped" : result.error,
