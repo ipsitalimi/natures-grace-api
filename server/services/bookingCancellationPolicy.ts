@@ -18,21 +18,9 @@ export type BookingRefundCalculation = {
   refundAmountInr: number;
 };
 
-function boundedNumber(value: unknown, fallback: number, min: number, max: number): number {
-  const parsed = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback;
-}
-
 export async function fetchBookingCancellationPolicy(
   supabase: SupabaseClient
 ): Promise<BookingCancellationPolicy> {
-  const { data } = await supabase
-    .from("platform_settings")
-    .select("settings")
-    .eq("id", "default")
-    .maybeSingle();
-
-  const settings = (data as { settings?: Record<string, unknown> } | null)?.settings ?? {};
   return {
     // The customer-facing cancellation policy is fixed for this release.
     // Do not let legacy admin settings silently override the agreed 24-hour rule.
