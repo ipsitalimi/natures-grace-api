@@ -19,6 +19,7 @@ export type EmailTemplateId =
   | "order_delivered"
   | "refund_approved"
   | "booking_refund_request_admin"
+  | "booking_refund_approved_manual"
   | "refund_paid"
   | "withdrawal_received"
   | "withdrawal_completed"
