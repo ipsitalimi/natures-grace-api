@@ -313,7 +313,7 @@ export function registerAdminOperationsRoutes(app: Express) {
         admin_notes: adminNotes,
         reviewed_by: admin.id,
         reviewed_at: new Date().toISOString(),
-        processed_at: null,
+        processed_at: status === "approved" && isStoreOrderRefund ? new Date().toISOString() : null,
       })
       .eq("id", refundId)
       .not("status", "in", '("approved","rejected","paid")');
