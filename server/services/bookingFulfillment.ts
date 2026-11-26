@@ -180,7 +180,7 @@ export async function sendPaidBookingReceipts(supabase: SupabaseClient, bookingI
     let result: Awaited<ReturnType<typeof sendTransactionalEmail>> = { ok: false, error: "Not attempted" };
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       result = await sendTransactionalEmail("booking_confirmed", email, emailVars, key);
-      if ((result.ok && !result.skipped) || result.skipped || attempt === 3) break;
+      if (result.ok || attempt === 3) break;
       await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
     }
     if (!result.ok || ("skipped" in result && result.skipped)) console.error("[bookingFulfillment] receipt email not delivered", { role: recipient.role, error: result.ok ? "Email provider skipped" : result.error });
