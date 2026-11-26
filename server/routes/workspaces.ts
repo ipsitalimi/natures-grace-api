@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from "express";
-import { requireRole } from "../middleware/auth";
+import { requireMasterAccount } from "../middleware/auth";
 import { requireSupabaseAdmin } from "../lib/supabaseAdmin";
 
 type WorkspaceRow = {
@@ -13,14 +13,14 @@ type WorkspaceRow = {
 
 export function registerWorkspaceRoutes(app: Express): void {
   app.get("/api/account/workspaces", async (req: Request, res: Response) => {
-    const admin = await requireRole(req, res, "Admin");
-    if (!admin) return;
+    const master = await requireMasterAccount(req, res);
+    if (!master) return;
 
     const supabase = requireSupabaseAdmin();
     const { data, error } = await supabase
       .from("account_workspaces")
       .select("id, workspace_profile_id, workspace_role, display_name, is_default, is_enabled")
-      .eq("owner_user_id", admin.id)
+      .eq("owner_user_id", master.authUserId)
       .order("is_default", { ascending: false })
       .order("display_name", { ascending: true });
 
@@ -58,8 +58,8 @@ export function registerWorkspaceRoutes(app: Express): void {
   });
 
   app.post("/api/account/workspaces/activate", async (req: Request, res: Response) => {
-    const admin = await requireRole(req, res, "Admin");
-    if (!admin) return;
+    const master = await requireMasterAccount(req, res);
+    if (!master) return;
 
     const workspaceProfileId = String(req.body?.workspace_profile_id ?? "").trim();
     if (!workspaceProfileId) {
@@ -70,7 +70,7 @@ export function registerWorkspaceRoutes(app: Express): void {
     const { data: workspace, error: workspaceError } = await supabase
       .from("account_workspaces")
       .select("workspace_profile_id, workspace_role, display_name, is_enabled")
-      .eq("owner_user_id", admin.id)
+      .eq("owner_user_id", master.authUserId)
       .eq("workspace_profile_id", workspaceProfileId)
       .eq("is_enabled", true)
       .maybeSingle();
@@ -100,13 +100,13 @@ export function registerWorkspaceRoutes(app: Express): void {
       if (!data) return res.status(403).json({ error: "Seller workspace is not set up yet" });
     }
 
-    const { data: authUser, error: authError } = await supabase.auth.admin.getUserById(admin.id);
+    const { data: authUser, error: authError } = await supabase.auth.admin.getUserById(master.authUserId);
     if (authError || !authUser.user) {
       return res.status(500).json({ error: "Unable to load account metadata" });
     }
 
     const existingMetadata = authUser.user.app_metadata ?? {};
-    const { error: updateError } = await supabase.auth.admin.updateUserById(admin.id, {
+    const { error: updateError } = await supabase.auth.admin.updateUserById(master.authUserId, {
       app_metadata: {
         ...existingMetadata,
         active_workspace_profile_id: workspace.workspace_profile_id,
