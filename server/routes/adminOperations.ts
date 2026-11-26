@@ -336,11 +336,17 @@ export function registerAdminOperationsRoutes(app: Express) {
       await dispatchUserNotification(supabase, {
         userId,
         event: "refund_approved",
-        message: Number((refund as { refund_amount?: number | null }).refund_amount ?? 0) > 0
-          ? `Your refund of ₹${Number((refund as { refund_amount?: number | null }).refund_amount).toLocaleString("en-IN")} has been approved. Nature's Grace will arrange the bank transfer manually and notify you once it is sent.`
-          : "Your cancellation has been approved. No refund is due under the applicable cancellation policy.",
+        message: bookingId
+          ? Number((refund as { refund_amount?: number | null }).refund_amount ?? 0) > 0
+            ? `Your booking refund of ₹${Number((refund as { refund_amount?: number | null }).refund_amount).toLocaleString("en-IN")} has been approved. Nature's Grace will arrange the bank transfer manually and notify you once it is sent.`
+            : "Your cancellation has been approved. No refund is due under the applicable cancellation policy."
+          : `Your refund request ${refundId} has been approved.`,
         linkRoute: "OrderHistory",
-        emailVars: { reference: refundId },
+        emailTemplateOverride: bookingId ? "booking_refund_approved_manual" : undefined,
+        emailVars: {
+          reference: refundId,
+          amount: `₹${Number((refund as { refund_amount?: number | null }).refund_amount ?? 0).toLocaleString("en-IN")}`,
+        },
       });
     } else if (status === "rejected") {
       await dispatchUserNotification(supabase, {
