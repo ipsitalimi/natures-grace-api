@@ -19,6 +19,7 @@ export type EmailTemplateId =
   | "order_delivered"
   | "refund_approved"
   | "booking_refund_request_admin"
+  | "refund_paid"
   | "withdrawal_received"
   | "withdrawal_completed"
   | "account_deletion_requested";
@@ -128,6 +129,10 @@ export function buildEmail(
     refund_approved: {
       subject: "Refund approved",
       body: `<p>Hi ${name},</p><p>Your refund request has been approved. Nature's Grace will arrange the transfer manually.</p><p><strong>Amount:</strong> ${safeVars.amount ?? ""}<br/><strong>Reference:</strong> ${safeVars.reference ?? ""}</p><p>Our team will notify you once the bank transfer is completed.</p>`,
+    },
+    refund_paid: {
+      subject: "Your refund bank transfer has been recorded",
+      body: `<p>Hi ${name},</p><p>Nature's Grace has recorded your manual bank transfer.</p><p><strong>Amount:</strong> ${safeVars.amount ?? ""}<br/><strong>Bank transfer reference:</strong> ${safeVars.reference ?? ""}</p><p>Please allow your bank's normal processing time for the funds to appear.</p>`,
     },
     booking_refund_request_admin: {
       subject: `Manual booking refund requires review — ${safeVars.bookingNumber ?? "Booking"}`,
