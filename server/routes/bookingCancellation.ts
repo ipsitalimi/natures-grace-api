@@ -97,7 +97,7 @@ export function registerBookingCancellationRoutes(app: Express): void {
         cancellationNote: notes || "Not provided",
       };
       const emailResults = await Promise.all(recipients.map((to) =>
-        sendTransactionalEmail("booking_refund_request_admin", to, emailVars, `booking-refund-request-${result.refund_request_id}`)
+        sendTransactionalEmail("booking_refund_request_admin", to, emailVars, `booking-refund-request-${result.refund_request_id}-${to.toLowerCase()}`)
       ));
       if (emailResults.some((emailResult) => !emailResult.ok)) {
         console.error("[bookingCancellation] One or more admin refund emails failed", emailResults);
