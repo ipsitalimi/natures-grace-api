@@ -201,9 +201,10 @@ export function registerAdminOperationsRoutes(app: Express) {
       return res.status(409).json({ error: `Refund already ${existingStatus}` });
     }
 
-    // Atomically claim approval to prevent concurrent admins from triggering duplicate refunds.
-    // If the gateway outcome is uncertain, leave this claim for manual reconciliation.
-    if (status === "approved") {
+    // Keep the existing processing claim only for store-order refunds.
+    // Practitioner booking refunds are approved for a later manual bank transfer.
+    const isStoreOrderRefund = Boolean((existing as { order_id?: string | null }).order_id);
+    if (status === "approved" && isStoreOrderRefund) {
       if ((existing as { processing_started_at?: string | null }).processing_started_at) {
         return res.status(409).json({ error: "Refund approval was already started. Refresh the request before retrying." });
       }
@@ -319,7 +320,7 @@ export function registerAdminOperationsRoutes(app: Express) {
 
     // Prevent review/rejection from racing an approval that has already claimed
     // the request, and require the approval claim before finalizing approval.
-    if (status === "approved") {
+    if (status === "approved" && isStoreOrderRefund) {
       finalUpdate = finalUpdate.not("processing_started_at", "is", null);
     } else {
       finalUpdate = finalUpdate.is("processing_started_at", null);
