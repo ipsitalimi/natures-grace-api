@@ -18,6 +18,7 @@ export type EmailTemplateId =
   | "order_shipped"
   | "order_delivered"
   | "refund_approved"
+  | "booking_refund_request_admin"
   | "withdrawal_received"
   | "withdrawal_completed"
   | "account_deletion_requested";
@@ -126,7 +127,11 @@ export function buildEmail(
     },
     refund_approved: {
       subject: "Refund approved",
-      body: `<p>Hi ${name},</p><p>Your refund request has been approved.</p><p><strong>Amount:</strong> ${safeVars.amount ?? ""}<br/><strong>Reference:</strong> ${safeVars.reference ?? ""}</p><p>Funds may take 5–10 business days to appear depending on your bank.</p>`,
+      body: `<p>Hi ${name},</p><p>Your refund request has been approved. Nature's Grace will arrange the transfer manually.</p><p><strong>Amount:</strong> ${safeVars.amount ?? ""}<br/><strong>Reference:</strong> ${safeVars.reference ?? ""}</p><p>Our team will notify you once the bank transfer is completed.</p>`,
+    },
+    booking_refund_request_admin: {
+      subject: `Manual booking refund requires review — ${safeVars.bookingNumber ?? "Booking"}`,
+      body: `<p>A customer has cancelled a practitioner session and a manual refund requires review.</p><p><strong>Booking:</strong> ${safeVars.bookingNumber ?? ""}<br/><strong>Refund request:</strong> ${safeVars.refundRequestId ?? ""}<br/><strong>Customer:</strong> ${safeVars.customerName ?? ""}<br/><strong>Customer email:</strong> ${safeVars.customerEmail ?? ""}<br/><strong>Practitioner:</strong> ${safeVars.practitionerName ?? ""}<br/><strong>Service:</strong> ${safeVars.serviceName ?? ""}<br/><strong>Session:</strong> ${safeVars.sessionDate ?? ""} at ${safeVars.sessionTime ?? ""} IST<br/><strong>Duration:</strong> ${safeVars.durationMinutes ?? ""} minutes<br/><strong>Refund to review:</strong> ${safeVars.refundAmount ?? ""}</p><p><strong>Customer's cancellation note:</strong> ${safeVars.cancellationNote ?? "Not provided"}</p><p>Review this request in the admin panel. If approved, arrange the bank transfer manually and record the transfer reference after payment. No payment is initiated by this email or the admin approval action.</p>`,
     },
     withdrawal_received: {
       subject: "Withdrawal request received",
