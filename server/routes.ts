@@ -13,6 +13,7 @@ import { registerAdminOperationsRoutes } from "./routes/adminOperations";
 import { registerTransactionalHooksRoutes } from "./routes/transactionalHooks";
 import { registerPaymentWebhookRoutes } from "./routes/paymentWebhooks";
 import { registerAccountRoutes } from "./routes/account";
+import { registerWorkspaceRoutes } from "./routes/workspaces";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   registerPayoutRoutes(app);
@@ -28,6 +29,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerTransactionalHooksRoutes(app);
   registerPaymentWebhookRoutes(app);
   registerAccountRoutes(app);
+  registerWorkspaceRoutes(app);
 
   const httpServer = createServer(app);
 
