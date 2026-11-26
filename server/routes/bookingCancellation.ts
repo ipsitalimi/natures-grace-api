@@ -2,6 +2,7 @@ import type { Express, Request, Response } from "express";
 import { requireBearerUser } from "../middleware/auth";
 import { requireSupabaseAdmin } from "../lib/supabaseAdmin";
 import { calculateBookingRefund, fetchBookingCancellationPolicy } from "../services/bookingCancellationPolicy";
+import { sendTransactionalEmail } from "../services/email/emailService";
 
 export function registerBookingCancellationRoutes(app: Express): void {
   app.post("/api/bookings/:id/cancel", async (req: Request, res: Response) => {
@@ -21,7 +22,7 @@ export function registerBookingCancellationRoutes(app: Express): void {
     const supabase = requireSupabaseAdmin();
     const { data: booking, error: bookingError } = await supabase
       .from("practitioner_bookings")
-      .select("id, user_id, payment_status, amount, total_paid_amount_inr, session_date, session_time")
+      .select("id, user_id, practitioner_id, booking_number, client_name, client_email, service_name, duration_minutes, payment_status, amount, total_paid_amount_inr, session_date, session_time")
       .eq("id", bookingId)
       .eq("user_id", user.id)
       .maybeSingle();
@@ -74,6 +75,33 @@ export function registerBookingCancellationRoutes(app: Express): void {
     const result = data as { ok?: boolean; error?: string; booking_id?: string; refund_request_id?: string | null };
     if (!result?.ok) {
       return res.status(400).json({ error: result?.error ?? "Cancellation failed" });
+    }
+
+    if (result.refund_request_id && Number(refundAmount ?? 0) > 0) {
+      const [{ data: admins }, { data: practitioner }] = await Promise.all([
+        supabase.from("profiles").select("email").eq("role", "Admin").not("email", "is", null),
+        supabase.from("practitioners").select("name").eq("id", booking.practitioner_id).maybeSingle(),
+      ]);
+      const recipients = [...new Set((admins ?? []).map((row) => String(row.email ?? "").trim()).filter(Boolean))];
+      const emailVars = {
+        bookingNumber: String(booking.booking_number ?? booking.id),
+        refundRequestId: result.refund_request_id,
+        customerName: String(booking.client_name ?? ""),
+        customerEmail: String(booking.client_email ?? ""),
+        practitionerName: String(practitioner?.name ?? "Practitioner"),
+        serviceName: String(booking.service_name ?? ""),
+        sessionDate: String(booking.session_date ?? ""),
+        sessionTime: String(booking.session_time ?? ""),
+        durationMinutes: String(booking.duration_minutes ?? ""),
+        refundAmount: `₹${Number(refundAmount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        cancellationNote: notes || "Not provided",
+      };
+      const emailResults = await Promise.all(recipients.map((to) =>
+        sendTransactionalEmail("booking_refund_request_admin", to, emailVars, `booking-refund-request-${result.refund_request_id}`)
+      ));
+      if (emailResults.some((emailResult) => !emailResult.ok)) {
+        console.error("[bookingCancellation] One or more admin refund emails failed", emailResults);
+      }
     }
 
     return res.json({
