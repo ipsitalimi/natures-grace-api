@@ -91,6 +91,21 @@ async function updatePractitionerPayoutStatus(
 }
 
 export function registerAdminOperationsRoutes(app: Express) {
+
+  app.get("/api/admin/booking-payment-reconciliation", async (req: Request, res: Response) => {
+    const admin = await requireRole(req, res, "Admin");
+    if (!admin) return;
+    const { data, error } = await requireSupabaseAdmin()
+      .from("booking_payment_reconciliation")
+      .select("*")
+      .eq("status", "needs_admin_review")
+      .order("created_at", { ascending: true })
+      .limit(100);
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json({ items: data ?? [] });
+  });
+
+
   app.get("/api/admin/payouts", async (req: Request, res: Response) => {
     const admin = await requireRole(req, res, "Admin");
     if (!admin) return;
