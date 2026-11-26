@@ -105,6 +105,7 @@ export async function requireRole(
         .select("id")
         .eq("profile_id", profile.id)
         .eq("is_active", true)
+        .eq("approval_status", "Approved")
         .maybeSingle();
       hasApprovedWorkspace = Boolean(data);
     } else if (role === "Seller") {
