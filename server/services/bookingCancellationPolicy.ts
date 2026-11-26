@@ -19,7 +19,7 @@ export type BookingRefundCalculation = {
 };
 
 export async function fetchBookingCancellationPolicy(
-  supabase: SupabaseClient
+  _supabase: SupabaseClient
 ): Promise<BookingCancellationPolicy> {
   return {
     // The customer-facing cancellation policy is fixed for this release.
