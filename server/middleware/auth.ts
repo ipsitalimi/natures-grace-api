@@ -7,6 +7,7 @@ export type AuthProfile = {
   id: string;
   email: string;
   role: string;
+  status?: string | null;
 };
 
 export async function getBearerUser(req: Request): Promise<AuthUser | null> {
@@ -56,7 +57,7 @@ export async function getBearerProfile(req: Request): Promise<AuthProfile | null
   const supabase = requireSupabaseAdmin();
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, email, role")
+    .select("id, email, role, status")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -68,13 +69,17 @@ export async function requireBearerUser(
   req: Request,
   res: Response
 ): Promise<AuthUser | null> {
-  const user = await getBearerUser(req);
-  if (!user) {
+  const profile = await getBearerProfile(req);
+  if (!profile) {
     console.warn("[auth][booking] sending 401 Unauthorized");
     res.status(401).json({ error: "Unauthorized" });
     return null;
   }
-  return user;
+  if (["Suspended", "Deletion Requested", "Deleted"].includes(profile.status ?? "")) {
+    res.status(403).json({ error: "Account is not active" });
+    return null;
+  }
+  return { id: profile.id, email: profile.email };
 }
 
 export async function requireRole(
@@ -87,9 +92,34 @@ export async function requireRole(
     res.status(401).json({ error: "Unauthorized" });
     return null;
   }
-  if (profile.role !== role) {
-    res.status(403).json({ error: "Forbidden" });
+  if (["Suspended", "Deletion Requested", "Deleted"].includes(profile.status ?? "")) {
+    res.status(403).json({ error: "Account is not active" });
     return null;
+  }
+  if (profile.role !== role) {
+    const supabase = requireSupabaseAdmin();
+    let hasApprovedWorkspace = false;
+    if (role === "Practitioner") {
+      const { data } = await supabase
+        .from("practitioners")
+        .select("id")
+        .eq("profile_id", profile.id)
+        .eq("is_active", true)
+        .maybeSingle();
+      hasApprovedWorkspace = Boolean(data);
+    } else if (role === "Seller") {
+      const { data } = await supabase
+        .from("sellers")
+        .select("id")
+        .eq("profile_id", profile.id)
+        .eq("is_active", true)
+        .maybeSingle();
+      hasApprovedWorkspace = Boolean(data);
+    }
+    if (!hasApprovedWorkspace) {
+      res.status(403).json({ error: "Forbidden" });
+      return null;
+    }
   }
   return profile;
 }
