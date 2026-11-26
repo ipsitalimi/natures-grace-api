@@ -257,7 +257,14 @@ async function handleConfirmPayment(req: Request, res: Response) {
       commissionRate,
     });
 
-    if (!created.ok) return res.status(500).json({ error: created.error });
+    if (!created.ok) {
+      const needsReview = created.error.startsWith("Payment received;");
+      return res.status(needsReview ? 202 : 500).json({
+        error: created.error,
+        paymentReceived: needsReview,
+        requiresAdminReview: needsReview,
+      });
+    }
 
     // Booking and wallet are committed; Meet creation is best-effort and cannot undo payment.
     await sendPaidBookingReceipts(supabase, created.bookingId, verified.paymentId);
