@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 const DEFAULT_FREE_CANCELLATION_HOURS = 24;
 const DEFAULT_CANCELLATION_FEE_PERCENT = 100;
+const OUTSIDE_WINDOW_FEE_PERCENT = 20;
 
 export type BookingCancellationPolicy = {
   freeCancellationHours: number;
@@ -33,18 +34,10 @@ export async function fetchBookingCancellationPolicy(
 
   const settings = (data as { settings?: Record<string, unknown> } | null)?.settings ?? {};
   return {
-    freeCancellationHours: boundedNumber(
-      settings.freeCancellationHours,
-      DEFAULT_FREE_CANCELLATION_HOURS,
-      0,
-      720
-    ),
-    cancellationFeePercent: boundedNumber(
-      settings.cancellationFeePercent,
-      DEFAULT_CANCELLATION_FEE_PERCENT,
-      0,
-      100
-    ),
+    // The customer-facing cancellation policy is fixed for this release.
+    // Do not let legacy admin settings silently override the agreed 24-hour rule.
+    freeCancellationHours: DEFAULT_FREE_CANCELLATION_HOURS,
+    cancellationFeePercent: DEFAULT_CANCELLATION_FEE_PERCENT,
   };
 }
 
@@ -96,8 +89,12 @@ export function calculateBookingRefund(params: {
 
   const hoursUntilSession =
     (sessionStart.getTime() - (params.now ?? new Date()).getTime()) / 3_600_000;
-  const freeCancellation = hoursUntilSession >= params.policy.freeCancellationHours;
-  const feePercent = freeCancellation ? 0 : params.policy.cancellationFeePercent;
+  // Locked Chunk 3 policy: more than 24 hours = 20% fee / 80% refund;
+  // at or within 24 hours = 100% fee / no refund.
+  const freeCancellation = false;
+  const feePercent = hoursUntilSession > 24
+    ? OUTSIDE_WINDOW_FEE_PERCENT
+    : 100;
   const refundPercent = 100 - feePercent;
   const refundAmountInr = Math.round((Math.max(0, params.amountInr) * refundPercent) / 100 * 100) / 100;
 
