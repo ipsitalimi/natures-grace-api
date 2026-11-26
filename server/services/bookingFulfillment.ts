@@ -183,6 +183,6 @@ export async function sendPaidBookingReceipts(supabase: SupabaseClient, bookingI
       if ((result.ok && !result.skipped) || result.skipped || attempt === 3) break;
       await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
     }
-    if (!result.ok || result.skipped) console.error("[bookingFulfillment] receipt email not delivered", { role: recipient.role, error: result.ok ? "Email provider skipped" : result.error });
+    if (!result.ok || ("skipped" in result && result.skipped)) console.error("[bookingFulfillment] receipt email not delivered", { role: recipient.role, error: result.ok ? "Email provider skipped" : result.error });
   }
 }
