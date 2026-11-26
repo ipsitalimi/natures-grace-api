@@ -75,10 +75,10 @@ export async function sendEventRegistrationReceipts(
     let result: Awaited<ReturnType<typeof sendTransactionalEmail>> = { ok: false, error: "Not attempted" };
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       result = await sendTransactionalEmail("event_registration_confirmed", email, vars, key);
-      if ((result.ok && !result.skipped) || result.skipped || attempt === 3) break;
+      if (result.ok || attempt === 3) break;
       await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
     }
-    if (!result.ok || result.skipped) {
+    if (!result.ok || ("skipped" in result && result.skipped)) {
       console.error("[eventFulfillment] event receipt email not delivered", {
         role: recipient.role,
         error: result.ok ? "Email provider skipped" : result.error,

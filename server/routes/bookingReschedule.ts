@@ -2,7 +2,7 @@ import type { Express, Request, Response } from "express";
 import { requireBearerUser } from "../middleware/auth";
 import { requireSupabaseAdmin } from "../lib/supabaseAdmin";
 
-const RESCHEDULE_DEADLINE_HOURS = 36;
+const RESCHEDULE_DEADLINE_HOURS = 24;
 
 export function registerBookingRescheduleRoutes(app: Express): void {
   app.post("/api/bookings/:id/reschedule", async (req: Request, res: Response) => {

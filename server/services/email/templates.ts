@@ -18,6 +18,10 @@ export type EmailTemplateId =
   | "order_shipped"
   | "order_delivered"
   | "refund_approved"
+  | "booking_payment_reconciliation_admin"
+  | "booking_refund_request_admin"
+  | "booking_refund_approved_manual"
+  | "refund_paid"
   | "withdrawal_received"
   | "withdrawal_completed"
   | "account_deletion_requested";
@@ -127,6 +131,22 @@ export function buildEmail(
     refund_approved: {
       subject: "Refund approved",
       body: `<p>Hi ${name},</p><p>Your refund request has been approved.</p><p><strong>Amount:</strong> ${safeVars.amount ?? ""}<br/><strong>Reference:</strong> ${safeVars.reference ?? ""}</p><p>Funds may take 5–10 business days to appear depending on your bank.</p>`,
+    },
+    booking_refund_approved_manual: {
+      subject: "Your booking refund has been approved",
+      body: `<p>Hi ${name},</p><p>Your practitioner-session refund request has been approved. Nature's Grace will arrange the bank transfer manually and notify you once it has been sent.</p><p><strong>Amount:</strong> ${safeVars.amount ?? ""}<br/><strong>Request reference:</strong> ${safeVars.reference ?? ""}</p>`,
+    },
+    refund_paid: {
+      subject: "Your refund bank transfer has been recorded",
+      body: `<p>Hi ${name},</p><p>Nature's Grace has recorded your manual bank transfer.</p><p><strong>Amount:</strong> ${safeVars.amount ?? ""}<br/><strong>Bank transfer reference:</strong> ${safeVars.reference ?? ""}</p><p>Please allow your bank's normal processing time for the funds to appear.</p>`,
+    },
+    booking_payment_reconciliation_admin: {
+      subject: `URGENT: Captured booking payment needs review — ${safeVars.orderId ?? "Razorpay order"}`,
+      body: `<p>A Razorpay payment was captured, but the selected practitioner session could not be confirmed automatically.</p><p><strong>Order:</strong> ${safeVars.orderId ?? ""}<br/><strong>Payment:</strong> ${safeVars.paymentId ?? ""}<br/><strong>Customer:</strong> ${safeVars.customerId ?? ""}<br/><strong>Practitioner:</strong> ${safeVars.practitionerId ?? ""}<br/><strong>Session:</strong> ${safeVars.sessionDate ?? ""} at ${safeVars.sessionTime ?? ""} IST<br/><strong>Reason:</strong> ${safeVars.reason ?? "Slot conflict"}</p><p>Review the booking payment reconciliation queue. Do not ask the customer to pay again. Arrange a confirmed alternative session or process the appropriate refund manually.</p>`,
+    },
+    booking_refund_request_admin: {
+      subject: `Manual booking refund requires review — ${safeVars.bookingNumber ?? "Booking"}`,
+      body: `<p>A customer has cancelled a practitioner session and a manual refund requires review.</p><p><strong>Booking:</strong> ${safeVars.bookingNumber ?? ""}<br/><strong>Refund request:</strong> ${safeVars.refundRequestId ?? ""}<br/><strong>Customer:</strong> ${safeVars.customerName ?? ""}<br/><strong>Customer email:</strong> ${safeVars.customerEmail ?? ""}<br/><strong>Practitioner:</strong> ${safeVars.practitionerName ?? ""}<br/><strong>Service:</strong> ${safeVars.serviceName ?? ""}<br/><strong>Session:</strong> ${safeVars.sessionDate ?? ""} at ${safeVars.sessionTime ?? ""} IST<br/><strong>Duration:</strong> ${safeVars.durationMinutes ?? ""} minutes<br/><strong>Refund to review:</strong> ${safeVars.refundAmount ?? ""}</p><p><strong>Customer's cancellation note:</strong> ${safeVars.cancellationNote ?? "Not provided"}</p><p>Review this request in the admin panel. If approved, arrange the bank transfer manually and record the transfer reference after payment. No payment is initiated by this email or the admin approval action.</p>`,
     },
     withdrawal_received: {
       subject: "Withdrawal request received",
