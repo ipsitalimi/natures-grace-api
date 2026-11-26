@@ -22,19 +22,22 @@ export type BookingDraft = {
     totalInr: number;
   };
   notes?: string;
+  slotReservationId?: string;
 };
 
 export async function savePendingBookingCheckout(
   supabase: SupabaseClient,
   userId: string,
   razorpayOrderId: string,
-  booking: BookingDraft
+  booking: BookingDraft,
+  slotReservationId?: string
 ): Promise<void> {
   const { error } = await supabase.from("pending_booking_checkouts").upsert(
     {
       user_id: userId,
       razorpay_order_id: razorpayOrderId,
       booking_draft: booking,
+      slot_reservation_id: slotReservationId ?? booking.slotReservationId ?? null,
       fulfilled_at: null,
       booking_id: null,
     },
