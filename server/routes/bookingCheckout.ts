@@ -261,6 +261,8 @@ async function handleConfirmPayment(req: Request, res: Response) {
       const needsReview = created.error.startsWith("Payment received;");
       return res.status(needsReview ? 202 : 500).json({
         error: created.error,
+        paymentId: verified.paymentId,
+        orderId: verified.orderId,
         paymentReceived: needsReview,
         requiresAdminReview: needsReview,
       });
