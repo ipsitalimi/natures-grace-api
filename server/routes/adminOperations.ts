@@ -197,7 +197,7 @@ export function registerAdminOperationsRoutes(app: Express) {
     }
 
     const existingStatus = String((existing as { status: string }).status);
-    if (existingStatus === "approved" || existingStatus === "rejected") {
+    if (existingStatus === "approved" || existingStatus === "rejected" || existingStatus === "paid") {
       return res.status(409).json({ error: `Refund already ${existingStatus}` });
     }
 
@@ -205,12 +205,12 @@ export function registerAdminOperationsRoutes(app: Express) {
     // If the gateway outcome is uncertain, leave this claim for manual reconciliation.
     if (status === "approved") {
       if ((existing as { processing_started_at?: string | null }).processing_started_at) {
-        return res.status(409).json({ error: "Refund processing was already started. Reconcile Razorpay before retrying." });
+        return res.status(409).json({ error: "Refund approval was already started. Refresh the request before retrying." });
       }
       const { data: claimed, error: claimError } = await supabase.from("refund_requests")
         .update({ processing_started_at: new Date().toISOString() })
         .eq("id", refundId).is("processing_started_at", null)
-        .not("status", "in", '("approved","rejected")').select("id").maybeSingle();
+        .not("status", "in", '("approved","rejected","paid")').select("id").maybeSingle();
       if (claimError || !claimed) {
         return res.status(409).json({ error: "Refund is already being processed or requires reconciliation." });
       }
