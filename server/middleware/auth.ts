@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import { requireSupabaseAdmin } from "../lib/supabaseAdmin";
 
-export type AuthUser = { id: string; email?: string };
+export type AuthUser = { id: string; email?: string; authUserId?: string };
 
 export type AuthProfile = {
   id: string;
@@ -118,7 +118,7 @@ export async function requireBearerUser(
     res.status(403).json({ error: "Account is not active" });
     return null;
   }
-  return { id: profile.authUserId, email: profile.email };
+  return { id: profile.id, email: profile.email, authUserId: profile.authUserId };
 }
 
 export async function requireRole(
