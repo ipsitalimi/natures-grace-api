@@ -44,28 +44,30 @@ export function registerAdminBookingScheduleRoutes(app: Express): void {
     }
 
     const supabase = requireSupabaseAdmin();
-    const { data: booking, error: fetchError } = await supabase
-      .from("practitioner_bookings")
-      .select("id, booking_status")
-      .eq("id", bookingId)
-      .maybeSingle();
+    const { data, error } = await supabase.rpc("admin_update_practitioner_booking_schedule", {
+      p_booking_id: bookingId,
+      p_new_session_date: body.sessionDate.trim(),
+      p_new_session_time: body.sessionTime.trim(),
+      p_meeting_link: body.meetingLink?.trim() || null,
+    });
 
-    if (fetchError || !booking) return res.status(404).json({ error: "Booking not found" });
-    if (!["Pending", "Confirmed"].includes(String(booking.booking_status))) {
-      return res.status(400).json({ error: "Only upcoming bookings can be scheduled" });
-    }
-
-    const { data, error } = await supabase.from("practitioner_bookings")
-      .update({
-        session_date: body.sessionDate.trim(),
-        session_time: body.sessionTime.trim(),
+    if (error) return res.status(500).json({ error: error.message });
+    const result = data as {
+      ok?: boolean;
+      error?: string;
+      booking_id?: string;
+      session_date?: string;
+      session_time?: string;
+    } | null;
+    if (!result?.ok) return res.status(409).json({ error: result?.error ?? "Schedule update failed" });
+    return res.json({
+      ok: true,
+      booking: {
+        id: result.booking_id,
+        session_date: result.session_date,
+        session_time: result.session_time,
         meeting_link: body.meetingLink?.trim() || null,
-      })
-      .eq("id", bookingId)
-      .select("id, session_date, session_time, meeting_link")
-      .single();
-
-    if (error || !data) return res.status(500).json({ error: error?.message ?? "Schedule update failed" });
-    return res.json({ ok: true, booking: data });
+      },
+    });
   });
 }
