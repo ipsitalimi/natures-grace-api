@@ -128,7 +128,11 @@ export function buildEmail(
     },
     refund_approved: {
       subject: "Refund approved",
-      body: `<p>Hi ${name},</p><p>Your refund request has been approved. Nature's Grace will arrange the transfer manually.</p><p><strong>Amount:</strong> ${safeVars.amount ?? ""}<br/><strong>Reference:</strong> ${safeVars.reference ?? ""}</p><p>Our team will notify you once the bank transfer is completed.</p>`,
+      body: `<p>Hi ${name},</p><p>Your refund request has been approved.</p><p><strong>Amount:</strong> ${safeVars.amount ?? ""}<br/><strong>Reference:</strong> ${safeVars.reference ?? ""}</p><p>Funds may take 5–10 business days to appear depending on your bank.</p>`,
+    },
+    booking_refund_approved_manual: {
+      subject: "Your booking refund has been approved",
+      body: `<p>Hi ${name},</p><p>Your practitioner-session refund request has been approved. Nature's Grace will arrange the bank transfer manually and notify you once it has been sent.</p><p><strong>Amount:</strong> ${safeVars.amount ?? ""}<br/><strong>Request reference:</strong> ${safeVars.reference ?? ""}</p>`,
     },
     refund_paid: {
       subject: "Your refund bank transfer has been recorded",
