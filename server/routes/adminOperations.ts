@@ -278,89 +278,25 @@ export function registerAdminOperationsRoutes(app: Express) {
             .eq("id", orderId);
         }
       } else if (bookingId) {
+        // Practitioner-session refunds are approved for manual bank transfer only.
+        // This branch intentionally does not call the payment gateway or alter checkout.
         const { data: booking } = await supabase
           .from("practitioner_bookings")
-          .select(
-            "id, booking_number, practitioner_id, booking_status, payment_status, amount, total_paid_amount_inr, service_name, razorpay_payment_id, session_date, session_time"
-          )
+          .select("id, booking_status, payment_status, amount, total_paid_amount_inr")
           .eq("id", bookingId)
           .maybeSingle();
 
         if (!booking) {
           refundError = "Booking not found";
         } else {
-          const savedSnapshot = (existing as { cancellation_policy_snapshot?: Record<string, unknown> | null }).cancellation_policy_snapshot;
-          let policySnapshot: Record<string, unknown>;
-          let refundAmountInr: number;
-
-          if (savedSnapshot && typeof savedSnapshot.refundAmountInr === "number") {
-            policySnapshot = savedSnapshot;
-            refundAmountInr = Number((existing as { refund_amount?: number | null }).refund_amount ?? savedSnapshot.refundAmountInr);
-          } else {
-            const policy = await fetchBookingCancellationPolicy(supabase);
-            const calculation = calculateBookingRefund({
-              amountInr: Number(booking.amount),
-              sessionDate: String(booking.session_date ?? ""),
-              sessionTime: String(booking.session_time ?? ""),
-              policy,
-            });
-            if ("error" in calculation) {
-              refundError = calculation.error;
-              policySnapshot = {};
-              refundAmountInr = 0;
-            } else {
-              refundAmountInr = calculation.refundAmountInr;
-              policySnapshot = {
-                freeCancellationHours: policy.freeCancellationHours,
-                cancellationFeePercent: policy.cancellationFeePercent,
-                sessionStartsAt: calculation.sessionStartsAt,
-                hoursUntilSession: calculation.hoursUntilSession,
-                freeCancellation: calculation.freeCancellation,
-                appliedFeePercent: calculation.cancellationFeePercent,
-                refundPercent: calculation.refundPercent,
-                bookingAmountInr: Number(booking.amount),
-                refundAmountInr,
-              };
-              const { error: snapshotError } = await supabase.from("refund_requests").update({
-                cancellation_policy_snapshot: policySnapshot, refund_amount: refundAmountInr,
-              }).eq("id", refundId);
-              if (snapshotError) refundError = snapshotError.message;
-            }
+          const refundAmountInr = Number((existing as { refund_amount?: number | null }).refund_amount ?? 0);
+          if (!Number.isFinite(refundAmountInr) || refundAmountInr < 0) {
+            refundError = "Invalid approved refund amount";
+          } else if (refundAmountInr > Number((booking as { total_paid_amount_inr?: number | null }).total_paid_amount_inr ?? booking.amount)) {
+            refundError = "Refund amount exceeds the customer's payment";
           }
-
-          if (!refundError && refundAmountInr > 0 && !booking.razorpay_payment_id) {
-            refundError = "Booking has no Razorpay payment ID — process refund manually";
-          } else if (!refundError) {
-            if (!refundError && refundAmountInr > 0) {
-              const gatewayRefund = await createRazorpayRefund({
-                paymentId: booking.razorpay_payment_id as string, amountInr: refundAmountInr,
-                notes: { refund_request_id: refundId },
-              });
-              if (!gatewayRefund.ok) refundError = gatewayRefund.error;
-              else {
-                const { error: refundIdError } = await supabase.from("refund_requests")
-                  .update({ razorpay_refund_id: gatewayRefund.refundId }).eq("id", refundId);
-                if (refundIdError) refundError = refundIdError.message;
-              }
-            }
-            if (!refundError && refundAmountInr > 0) {
-              const reversal = await reverseBookingEarningForRefund(supabase, {
-                id: booking.id, booking_number: booking.booking_number, practitioner_id: booking.practitioner_id,
-                booking_status: booking.booking_status, payment_status: booking.payment_status,
-                amount: Number(booking.amount), service_name: booking.service_name,
-              }, refundId, refundAmountInr,
-              Number((booking as { total_paid_amount_inr?: number | null }).total_paid_amount_inr ?? booking.amount),
-              commissionRate);
-              if (reversal.error) refundError = reversal.error;
-            }
-            if (!refundError) {
-              const fullRefund = refundAmountInr >= Number((booking as { total_paid_amount_inr?: number | null }).total_paid_amount_inr ?? booking.amount);
-              const { error: bookingUpdateError } = await supabase.from("practitioner_bookings").update({
-                booking_status: "Cancelled", payment_status: fullRefund ? "Refunded" : booking.payment_status,
-              }).eq("id", bookingId);
-              if (bookingUpdateError) refundError = bookingUpdateError.message;
-            }
-          }
+          // No gateway refund and no practitioner wallet adjustment here.
+          // Wallet reconciliation happens only after the admin records the manual transfer.
         }
       }
 
@@ -376,7 +312,7 @@ export function registerAdminOperationsRoutes(app: Express) {
         admin_notes: adminNotes,
         reviewed_by: admin.id,
         reviewed_at: new Date().toISOString(),
-        processed_at: status === "approved" ? new Date().toISOString() : null,
+        processed_at: null,
       })
       .eq("id", refundId)
       .not("status", "in", '("approved","rejected")');
@@ -400,7 +336,7 @@ export function registerAdminOperationsRoutes(app: Express) {
         userId,
         event: "refund_approved",
         message: Number((refund as { refund_amount?: number | null }).refund_amount ?? 0) > 0
-          ? `Your refund of ₹${Number((refund as { refund_amount?: number | null }).refund_amount).toLocaleString("en-IN")} has been approved. Funds typically return within 7–10 business days.`
+          ? `Your refund of ₹${Number((refund as { refund_amount?: number | null }).refund_amount).toLocaleString("en-IN")} has been approved. Nature's Grace will arrange the bank transfer manually and notify you once it is sent.`
           : "Your cancellation has been approved. No refund is due under the applicable cancellation policy.",
         linkRoute: "OrderHistory",
         emailVars: { reference: refundId },
@@ -425,6 +361,105 @@ export function registerAdminOperationsRoutes(app: Express) {
     });
 
     return res.json({ ok: true, refund });
+  });
+
+  app.post("/api/admin/refunds/:id/mark-paid", async (req: Request, res: Response) => {
+    const admin = await requireRole(req, res, "Admin");
+    if (!admin) return;
+
+    const refundId = String(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
+    const body = req.body as { bankTransferReference?: unknown; adminNotes?: unknown };
+    const bankTransferReference = typeof body.bankTransferReference === "string"
+      ? body.bankTransferReference.trim().slice(0, 200)
+      : "";
+    const adminNotes = typeof body.adminNotes === "string" ? body.adminNotes.trim().slice(0, 2000) : undefined;
+    if (!bankTransferReference) {
+      return res.status(400).json({ error: "Bank transfer reference is required" });
+    }
+
+    const supabase = requireSupabaseAdmin();
+    const { data: refund, error: refundError } = await supabase
+      .from("refund_requests")
+      .select("id, user_id, booking_id, order_id, status, refund_amount")
+      .eq("id", refundId)
+      .maybeSingle();
+
+    if (refundError || !refund) return res.status(404).json({ error: "Refund request not found" });
+    if (!refund.booking_id || refund.order_id) {
+      return res.status(400).json({ error: "This action is only for practitioner booking refunds" });
+    }
+    if (refund.status !== "approved") {
+      return res.status(409).json({ error: "Only approved refund requests can be marked paid" });
+    }
+
+    const amount = Number(refund.refund_amount ?? 0);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ error: "There is no refundable amount to transfer" });
+    }
+
+    const { data: booking, error: bookingError } = await supabase
+      .from("practitioner_bookings")
+      .select("id, booking_number, practitioner_id, booking_status, payment_status, amount, total_paid_amount_inr, service_name")
+      .eq("id", refund.booking_id)
+      .maybeSingle();
+    if (bookingError || !booking) return res.status(404).json({ error: "Related booking not found" });
+
+    // The transfer has already been made by the admin. Record its reference and
+    // reconcile the practitioner's earning ledger idempotently; no gateway call.
+    const commissionRate = await fetchCommissionRate(supabase);
+    const reversal = await reverseBookingEarningForRefund(supabase, {
+      id: booking.id,
+      booking_number: booking.booking_number,
+      practitioner_id: booking.practitioner_id,
+      booking_status: booking.booking_status,
+      payment_status: booking.payment_status,
+      amount: Number(booking.amount),
+      service_name: booking.service_name,
+    }, refundId, amount,
+    Number((booking as { total_paid_amount_inr?: number | null }).total_paid_amount_inr ?? booking.amount),
+    commissionRate);
+    if (reversal.error) {
+      return res.status(502).json({ error: `Transfer reference received, but wallet reconciliation failed: ${reversal.error}. Retry this action with the same reference.` });
+    }
+
+    const { data: updated, error: updateError } = await supabase
+      .from("refund_requests")
+      .update({
+        status: "paid",
+        bank_transfer_reference: bankTransferReference,
+        paid_at: new Date().toISOString(),
+        paid_by: admin.id,
+        processed_at: new Date().toISOString(),
+        ...(adminNotes ? { admin_notes: adminNotes } : {}),
+      })
+      .eq("id", refundId)
+      .eq("status", "approved")
+      .select("id, user_id, refund_amount, bank_transfer_reference, paid_at, status")
+      .maybeSingle();
+
+    if (updateError || !updated) {
+      return res.status(409).json({ error: updateError?.message ?? "Refund status changed concurrently. Refresh before retrying." });
+    }
+
+    await dispatchUserNotification(supabase, {
+      userId: refund.user_id,
+      event: "refund_approved",
+      message: `Your manual bank transfer of ₹${amount.toLocaleString("en-IN")} has been recorded as sent. Reference: ${bankTransferReference}.`,
+      linkRoute: "OrderHistory",
+      emailTemplateOverride: "refund_paid",
+      emailVars: { amount: `₹${amount.toLocaleString("en-IN")}`, reference: bankTransferReference },
+    });
+
+    await insertActivityLog(supabase, {
+      actorId: admin.id,
+      actorName: admin.email,
+      actionType: "store",
+      description: `Manual booking refund ${refundId} marked paid; bank transfer reference ${bankTransferReference}`,
+      targetType: "refund",
+      targetId: refundId,
+    });
+
+    return res.json({ ok: true, refund: updated, reversedPractitionerEarning: reversal.reversedAmount });
   });
 
   app.post("/api/admin/users/:id/role", async (req: Request, res: Response) => {
