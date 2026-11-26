@@ -89,7 +89,7 @@ async function handleCreateOrder(req: Request, res: Response) {
       booking?: BookingDraft;
     };
 
-    if (!body.practitionerId || !body.durationMinutes || !body.amountInr) {
+    if (!body.practitionerId || !body.durationMinutes || !body.amountInr || !body.booking) {
       return res.status(400).json({
         error: "practitionerId, durationMinutes, and amountInr are required",
       });
@@ -107,6 +107,27 @@ async function handleCreateOrder(req: Request, res: Response) {
     }
 
     const supabase = requireSupabaseAdmin();
+    const bookingDraft = body.booking;
+    const offeringId = body.offeringId ?? bookingDraft.offeringId;
+    if (!offeringId || !bookingDraft.sessionDate || !bookingDraft.sessionTime ||
+        Number(bookingDraft.durationMinutes) !== Number(body.durationMinutes)) {
+      return res.status(400).json({ error: "A complete booking slot and offering are required" });
+    }
+
+    const { data: reservation, error: reservationError } = await supabase.rpc("reserve_practitioner_slot", {
+      p_user_id: user.id,
+      p_practitioner_id: body.practitionerId,
+      p_offering_id: offeringId,
+      p_session_date: bookingDraft.sessionDate,
+      p_session_time: bookingDraft.sessionTime,
+      p_duration_minutes: Number(body.durationMinutes),
+    });
+    if (reservationError) return res.status(500).json({ error: "Could not reserve this session slot" });
+    const reservationResult = reservation as { ok?: boolean; error?: string; reservation_id?: string } | null;
+    if (!reservationResult?.ok || !reservationResult.reservation_id) {
+      return res.status(409).json({ error: reservationResult?.error ?? "This session slot is unavailable" });
+    }
+
     const feeSettings = await fetchCheckoutFeeSettings(supabase);
     const feeBreakdown = calculateCheckoutTotal(validated.amountInr, feeSettings);
 
@@ -120,15 +141,37 @@ async function handleCreateOrder(req: Request, res: Response) {
     });
 
     if (!result.ok) {
+      await supabase.rpc("release_practitioner_slot_reservation", {
+        p_user_id: user.id, p_reservation_id: reservationResult.reservation_id,
+      });
       return res.status(502).json({ error: result.error });
     }
 
-    if (body.booking) {
+    try {
       await savePendingBookingCheckout(supabase, user.id, result.orderId, {
-        ...body.booking,
+        ...bookingDraft,
+        offeringId,
         amountInr: validated.amountInr,
         feeBreakdown,
+        slotReservationId: reservationResult.reservation_id,
+      }, reservationResult.reservation_id);
+
+      const { data: attached, error: attachError } = await supabase.rpc("attach_practitioner_slot_reservation", {
+        p_user_id: user.id,
+        p_reservation_id: reservationResult.reservation_id,
+        p_razorpay_order_id: result.orderId,
       });
+      if (attachError || attached !== true) {
+        await supabase.rpc("release_practitioner_slot_reservation", {
+          p_user_id: user.id, p_reservation_id: reservationResult.reservation_id,
+        });
+        return res.status(409).json({ error: "The slot reservation expired. Please select the time again." });
+      }
+    } catch (saveError) {
+      await supabase.rpc("release_practitioner_slot_reservation", {
+        p_user_id: user.id, p_reservation_id: reservationResult.reservation_id,
+      });
+      throw saveError;
     }
 
     const keyId = process.env.RAZORPAY_KEY_ID?.trim() ?? null;
