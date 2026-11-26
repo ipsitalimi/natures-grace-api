@@ -18,6 +18,7 @@ export type EmailTemplateId =
   | "order_shipped"
   | "order_delivered"
   | "refund_approved"
+  | "booking_payment_reconciliation_admin"
   | "booking_refund_request_admin"
   | "booking_refund_approved_manual"
   | "refund_paid"
@@ -138,6 +139,10 @@ export function buildEmail(
     refund_paid: {
       subject: "Your refund bank transfer has been recorded",
       body: `<p>Hi ${name},</p><p>Nature's Grace has recorded your manual bank transfer.</p><p><strong>Amount:</strong> ${safeVars.amount ?? ""}<br/><strong>Bank transfer reference:</strong> ${safeVars.reference ?? ""}</p><p>Please allow your bank's normal processing time for the funds to appear.</p>`,
+    },
+    booking_payment_reconciliation_admin: {
+      subject: `URGENT: Captured booking payment needs review — ${safeVars.orderId ?? "Razorpay order"}`,
+      body: `<p>A Razorpay payment was captured, but the selected practitioner session could not be confirmed automatically.</p><p><strong>Order:</strong> ${safeVars.orderId ?? ""}<br/><strong>Payment:</strong> ${safeVars.paymentId ?? ""}<br/><strong>Customer:</strong> ${safeVars.customerId ?? ""}<br/><strong>Practitioner:</strong> ${safeVars.practitionerId ?? ""}<br/><strong>Session:</strong> ${safeVars.sessionDate ?? ""} at ${safeVars.sessionTime ?? ""} IST<br/><strong>Reason:</strong> ${safeVars.reason ?? "Slot conflict"}</p><p>Review the booking payment reconciliation queue. Do not ask the customer to pay again. Arrange a confirmed alternative session or process the appropriate refund manually.</p>`,
     },
     booking_refund_request_admin: {
       subject: `Manual booking refund requires review — ${safeVars.bookingNumber ?? "Booking"}`,
