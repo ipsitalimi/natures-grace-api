@@ -315,7 +315,7 @@ export function registerAdminOperationsRoutes(app: Express) {
         processed_at: null,
       })
       .eq("id", refundId)
-      .not("status", "in", '("approved","rejected")');
+      .not("status", "in", '("approved","rejected","paid")');
 
     // Prevent review/rejection from racing an approval that has already claimed
     // the request, and require the approval claim before finalizing approval.
